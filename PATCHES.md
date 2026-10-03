@@ -1,5 +1,8 @@
 # Local patches in this fork
 
+Base: upstream `2026.10.0` (synced 2026-10-03; the 43 upstream
+commits since `2026.9.2` touch none of the files patched below).
+
 This fork is based on `make-all/tuya-local`. All local patches live on the
 `local-patches` branch (see `git log` for details); releases are cut from it so
 HACS updates keep the patches.
