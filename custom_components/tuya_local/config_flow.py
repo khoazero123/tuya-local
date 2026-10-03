@@ -117,7 +117,19 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
             )
             or device_id
         }
-        return await self.async_step_user()
+
+        # The device is already known from the LAN scan, so go straight to the
+        # device details instead of showing the setup-mode form again (which
+        # made this look identical to the bulk "Add device" flow).  A saved
+        # cloud login is used to fill in the local key when one is available.
+        self.init_cloud()
+        try:
+            if self.cloud.is_authenticated:
+                self.__cloud_devices = await self.cloud.async_get_devices()
+                return await self._async_continue_after_login()
+        except Exception as e:  # noqa: BLE001 - fall back to the manual form
+            _LOGGER.warning("Could not use the saved Tuya cloud login: %s", e)
+        return await self.async_step_local()
 
     async def async_step_user(self, user_input=None):
         errors = {}
