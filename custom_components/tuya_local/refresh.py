@@ -138,7 +138,13 @@ async def async_relocate_devices(hass: HomeAssistant) -> dict[str, Any]:
 
 async def async_handle_refresh_devices(call: ServiceCall) -> dict[str, Any]:
     """Service handler: relocate devices, refresh cloud names, rescan."""
+    from .cloud import async_restore_auth
+
     hass = call.hass
+
+    # Load a saved cloud login from disk first: it may not have been restored
+    # yet in this Home Assistant session.
+    await async_restore_auth(hass)
 
     relocated = await async_relocate_devices(hass)
     names = await async_refresh_names(hass)

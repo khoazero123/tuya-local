@@ -133,7 +133,27 @@ minutes after a restart nothing was listed under "Discovered".
 - `custom_components/tuya_local/refresh.py`
   - same `maxretry=2` for the on-demand refresh scan.
 
-## 7. Local device config: Zitech ZT-Box
+
+## 7. Local key left empty on a discovered device (2026.9.2.10)
+
+**Problem:** clicking Add on a Discovered card opened the device details with
+the device id, IP and protocol prefilled but the **local key empty**, even
+though a cloud login was saved.  The saved login lives on disk
+(`/config/.storage/tuya_local.cloud_auth`) and is only restored into
+`hass.data` by `async_restore_auth()`, which the discovery step never called —
+so `Cloud.is_authenticated` was False and the cloud device list (the only local
+source of the local key) was never consulted.
+
+**Patch:**
+- `custom_components/tuya_local/config_flow.py`
+  - `async_step_integration_discovery` calls `await async_restore_auth(hass)`
+    before `init_cloud()`.
+- `custom_components/tuya_local/refresh.py`
+  - `async_handle_refresh_devices` restores the saved login before refreshing
+    the cloud device names, so the refresh button works right after a restart
+    too.
+
+## 8. Local device config: Zitech ZT-Box
 
 - `custom_components/tuya_local/devices/zitech_ztbox.yaml` — added so a HACS
   update cannot delete it (it previously lived only in `/config`).

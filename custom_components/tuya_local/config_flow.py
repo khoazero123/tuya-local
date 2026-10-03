@@ -121,7 +121,9 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
         # The device is already known from the LAN scan, so go straight to the
         # device details instead of showing the setup-mode form again (which
         # made this look identical to the bulk "Add device" flow).  A saved
-        # cloud login is used to fill in the local key when one is available.
+        # cloud login is used to fill in the local key when one is available,
+        # so make sure the saved login is loaded first.
+        await async_restore_auth(self.hass)
         self.init_cloud()
         try:
             if self.cloud.is_authenticated:
