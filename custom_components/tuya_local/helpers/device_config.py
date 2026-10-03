@@ -249,7 +249,11 @@ class TuyaDeviceConfig:
             detail = " ".join(
                 str(p.get(key)) for key in ("manufacturer", "model") if p.get(key)
             )
-            return f"{self.name} · {detail}" if detail else self.name
+            # Do not repeat the config name when it already contains the
+            # manufacturer/model (e.g. "Zitech ZT-Box · Zitech ZT-Box").
+            if not detail or detail.lower() in self.name.lower():
+                return self.name
+            return f"{self.name} · {detail}"
         return None
 
     def product_display_entries(self, product_ids=None):
