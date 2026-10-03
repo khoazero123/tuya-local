@@ -87,7 +87,7 @@ async def async_refresh_names(hass: HomeAssistant) -> dict[str, str] | None:
 def _scan_lan() -> dict[str, str]:
     """Blocking LAN scan; returns {device_id: ip}."""
     try:
-        found = tinytuya.deviceScan(verbose=False, poll=False)
+        found = tinytuya.deviceScan(verbose=False, poll=False, maxretry=2)
     except OSError as err:
         _LOGGER.warning("LAN scan failed: %s", err)
         return {}

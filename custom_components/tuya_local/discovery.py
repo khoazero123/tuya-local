@@ -34,6 +34,7 @@ References:
 - the integration's own config-flow scan: config_flow.scan_for_device
 """
 
+import asyncio
 import logging
 from datetime import timedelta
 
@@ -58,6 +59,10 @@ SWEEP_INTERVAL = timedelta(seconds=60)
 # discovery). Infrequent, since neither action is time critical.
 SCAN_INTERVAL = timedelta(minutes=10)
 
+# Delay before the extra scan that runs shortly after startup, so devices show
+# up under "Discovered" without waiting a full SCAN_INTERVAL after a restart.
+STARTUP_SCAN_DELAY = 45
+
 
 def _find_device(device_id):
     """Locate a device by id on the LAN (blocking; run in executor).
@@ -79,7 +84,7 @@ def _scan_all():
     ``productKey`` and ``version``; an empty dict on any socket error.
     """
     try:
-        return tinytuya.deviceScan(verbose=False, poll=False)
+        return tinytuya.deviceScan(verbose=False, poll=False, maxretry=2)
     except OSError:
         return {}
 
@@ -113,6 +118,18 @@ class TuyaLANRediscovery:
             self._unsub_scan = async_track_time_interval(
                 self._hass, self._async_discovery_scan, SCAN_INTERVAL
             )
+        # One extra scan shortly after startup: a Home Assistant restart clears
+        # in-progress config flows, so without this the Discovered cards would
+        # not come back until the first periodic scan, up to SCAN_INTERVAL later.
+        self._hass.async_create_task(self._async_startup_scan())
+
+    async def _async_startup_scan(self) -> None:
+        """Run one discovery scan shortly after startup."""
+        await asyncio.sleep(STARTUP_SCAN_DELAY)
+        try:
+            await self._async_discovery_scan()
+        except Exception as err:  # noqa: BLE001 - never break setup
+            _LOGGER.warning("Startup discovery scan failed: %s", err)
 
     @callback
     def async_stop(self, event=None) -> None:

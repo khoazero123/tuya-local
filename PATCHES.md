@@ -118,7 +118,22 @@ list.
   - the shortcut is factored into `_async_continue_after_login()` and used both
     after the QR scan and when an existing (cached) login is reused.
 
-## 6. Local device config: Zitech ZT-Box
+
+## 6. Discovered cards missing after a restart (2026.9.2.8)
+
+**Problem:** a Home Assistant restart clears in-progress config flows, and the
+discovery scan only runs every `SCAN_INTERVAL` (10 minutes), so for up to ten
+minutes after a restart nothing was listed under "Discovered".
+
+**Patch:**
+- `custom_components/tuya_local/discovery.py`
+  - runs one extra scan `STARTUP_SCAN_DELAY` (45s) after startup;
+  - the LAN scan now uses `maxretry=2` so a single lost packet no longer makes
+    a reachable device look absent.
+- `custom_components/tuya_local/refresh.py`
+  - same `maxretry=2` for the on-demand refresh scan.
+
+## 7. Local device config: Zitech ZT-Box
 
 - `custom_components/tuya_local/devices/zitech_ztbox.yaml` — added so a HACS
   update cannot delete it (it previously lived only in `/config`).
