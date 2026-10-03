@@ -1,0 +1,236 @@
+# HA device file cho "Cửa thông minh ZT-Box" (Zitech) — pid bolrg9mcadqiejd0
+# Đặt vào: <config>/custom_components/tuya_local/devices/zitech_ztbox.yaml
+# Chỉ dùng các DP thiết bị THỰC SỰ báo (tuya_local yêu cầu mọi DP non-optional phải tồn tại):
+#   1,2,3,4,16,27,101,104,105,106,107,108,109,110,111,112,113,114,115,118,119,120
+#
+# DP điều khiển: DP1=MỞ, DP2=ĐÓNG, DP3=DỪNG, DP4=KHOÁ, DP114=vị trí 0..100, DP111=hành trình (s)
+# DP104=nút xoá remote, DP110/112/115 = công tắc cấu hình (tên tạm), DP118/119/120 = trạng thái (ro)
+
+name: Zitech ZT-Box
+products:
+  - id: bolrg9mcadqiejd0
+    manufacturer: Zitech
+    model: ZT-Box
+entities:
+  - entity: cover
+    class: door
+    dps:
+      - id: 1
+        type: boolean
+        name: control
+        mapping:
+          - dps_val: true
+            value: open
+          - dps_val: false
+            constraint: close_control
+            conditions:
+              - dps_val: true
+                value: close
+                value_redirect: close_control
+              - dps_val: false
+                value: stop
+                value_redirect: stop_control
+      - id: 2
+        type: boolean
+        name: close_control
+        hidden: true
+        mapping:
+          - dps_val: true
+            value: close
+          - value_redirect: stop_control
+      - id: 3
+        type: boolean
+        name: stop_control
+        hidden: true
+        mapping:
+          - dps_val: true
+            value: stop
+          - value: null
+      - id: 114
+        type: integer
+        name: position
+        range:
+          min: 0
+          max: 100
+        mapping:
+          # Box báo vị trí NGƯỢC sau khi đảo L/N (0 = mở, 100 = đóng) -> đảo lại cho khớp
+          - invert: true
+      - id: 114
+        type: integer
+        name: current_position
+        range:
+          min: 0
+          max: 100
+        mapping:
+          - invert: true
+  - entity: lock
+    dps:
+      - id: 4
+        type: boolean
+        name: lock
+  - entity: light
+    translation_key: backlight
+    category: config
+    dps:
+      - id: 16
+        type: boolean
+        name: switch
+  - entity: sensor
+    name: Bộ đếm (DP27)
+    category: diagnostic
+    dps:
+      - id: 27
+        type: integer
+        name: sensor
+  - entity: binary_sensor
+    class: door
+    dps:
+      - id: 101
+        type: boolean
+        name: sensor
+  - entity: button
+    name: Xóa Remote và cảm biến RF
+    category: config
+    dps:
+      - id: 104
+        type: boolean
+        name: button
+  - entity: binary_sensor
+    name: Nguồn AC
+    class: connectivity
+    icon: "mdi:lightning-bolt"
+    category: diagnostic
+    dps:
+      - id: 105
+        type: string
+        name: sensor
+        mapping:
+          - dps_val: "ON"
+            value: true
+          - value: false
+  - entity: binary_sensor
+    name: Nguồn DC
+    class: connectivity
+    icon: "mdi:current-dc"
+    category: diagnostic
+    dps:
+      - id: 106
+        type: string
+        name: sensor
+        mapping:
+          - dps_val: "ON"
+            value: true
+          - value: false
+  - entity: binary_sensor
+    name: Chống xô có dây
+    class: connected
+    category: diagnostic
+    dps:
+      - id: 107
+        type: string
+        name: sensor
+        mapping:
+          - dps_val: connected
+            value: true
+          - value: false
+  - entity: binary_sensor
+    name: Cảm biến cửa
+    class: window
+    category: diagnostic
+    dps:
+      - id: 108
+        type: string
+        name: sensor
+        mapping:
+          - dps_val: OPEN
+            value: true
+          - value: false
+  - entity: binary_sensor
+    name: Nguồn
+    class: power
+    category: diagnostic
+    dps:
+      - id: 109
+        type: string
+        name: sensor
+        mapping:
+          - dps_val: "ON"
+            value: true
+          - value: false
+  - entity: switch
+    name: Công tắc 110
+    category: config
+    dps:
+      - id: 110
+        type: boolean
+        name: switch
+  - entity: number
+    name: Thời gian hành trình cửa
+    category: config
+    dps:
+      - id: 111
+        type: integer
+        name: value
+        range:
+          min: 0
+          max: 900
+        unit: s
+  - entity: switch
+    name: Công tắc 112
+    category: config
+    dps:
+      - id: 112
+        type: boolean
+        name: switch
+  - entity: binary_sensor
+    name: Lỗi (DP113)
+    class: problem
+    category: diagnostic
+    dps:
+      - id: 113
+        type: string
+        name: sensor
+        mapping:
+          - dps_val: error
+            value: true
+          - value: false
+  - entity: switch
+    name: Công tắc 115
+    category: config
+    dps:
+      - id: 115
+        type: boolean
+        name: switch
+  - entity: binary_sensor
+    name: Trạng thái 118
+    category: diagnostic
+    dps:
+      - id: 118
+        type: string
+        name: sensor
+        mapping:
+          - dps_val: "ON"
+            value: true
+          - value: false
+  - entity: binary_sensor
+    name: Trạng thái 119
+    category: diagnostic
+    dps:
+      - id: 119
+        type: string
+        name: sensor
+        mapping:
+          - dps_val: "ON"
+            value: true
+          - value: false
+  - entity: binary_sensor
+    name: Trạng thái 120
+    category: diagnostic
+    dps:
+      - id: 120
+        type: string
+        name: sensor
+        mapping:
+          - dps_val: "ON"
+            value: true
+          - value: false

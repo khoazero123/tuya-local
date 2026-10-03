@@ -41,7 +41,7 @@ from .const import (
 )
 from .device import TuyaLocalDevice
 from .helpers.config import get_device_id
-from .helpers.device_config import get_config
+from .helpers.device_config import get_config, product_display_name
 from .helpers.log import log_json
 
 _LOGGER = logging.getLogger(__name__)
@@ -89,8 +89,19 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
             "local_product_id": discovery_info.get("product_id"),
             CONF_LOCAL_KEY: "",
         }
+        # Label the Discovered card with the device type (looked up from the
+        # product id in the shipped device configs) as well as the IP, since
+        # an IP alone makes it impossible to tell which device is which.
+        label = await self.hass.async_add_executor_job(
+            product_display_name, discovery_info.get("product_id")
+        )
         self.context["title_placeholders"] = {
-            "name": discovery_info.get(CONF_HOST) or device_id
+            "name": " · ".join(
+                part
+                for part in (label, discovery_info.get(CONF_HOST))
+                if part
+            )
+            or device_id
         }
         return await self.async_step_user()
 

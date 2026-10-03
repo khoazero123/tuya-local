@@ -235,6 +235,23 @@ class TuyaDeviceConfig:
 
         return product_match or round((total - len(keys)) * 100 / total)
 
+    def product_display_name(self, product_id):
+        """Human readable name for a product id listed in this config.
+
+        Returns e.g. "Air conditioner · Daikin FTXS25" when the product id is
+        listed here, otherwise None.
+        """
+        if not product_id:
+            return None
+        for p in self._config.get("products", []):
+            if p.get("id") != product_id:
+                continue
+            detail = " ".join(
+                str(p.get(key)) for key in ("manufacturer", "model") if p.get(key)
+            )
+            return f"{self.name} · {detail}" if detail else self.name
+        return None
+
     def product_display_entries(self, product_ids=None):
         """Return distinct (manufacturer, model) pairs for display in the config flow.
 
@@ -1185,6 +1202,36 @@ def available_configs():
             if direntry.is_file() and fnmatch(direntry.name, "*.yaml"):
                 yield direntry.name
 
+
+_product_names = {}
+
+def product_display_name(product_id):
+    """Look up a human readable name for a Tuya product id in the configs.
+
+    Used to label discovered devices with something more useful than their IP.
+    Only configs whose text mentions the product id are parsed, and the result
+    is cached for the lifetime of the process.
+
+    Blocking; call from an executor.
+    """
+    if not product_id:
+        return None
+    if product_id in _product_names:
+        return _product_names[product_id] or None
+    _CONFIG_DIR = dirname(config_dir.__file__)
+    name = None
+    for fname in available_configs():
+        try:
+            with open(join(_CONFIG_DIR, fname), encoding="utf-8") as fh:
+                if product_id not in fh.read():
+                    continue
+        except OSError:
+            continue
+        name = TuyaDeviceConfig(fname).product_display_name(product_id)
+        if name:
+            break
+    _product_names[product_id] = name or ""
+    return name
 
 def possible_matches(dps, product_ids=None):
     """Return possible matching configs for a given set of
