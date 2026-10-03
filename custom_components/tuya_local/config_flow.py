@@ -95,6 +95,17 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
         # to tell which device is which).
         label = discovery_info.get("name")
         if not label:
+            # Prefer a config already used for the same product id: a product id
+            # alone can match several device configs, and the one the user
+            # already runs is the best guess for this one.
+            preferred = discovery_info.get("preferred_type")
+            if preferred:
+                preferred_config = await self.hass.async_add_executor_job(
+                    get_config, preferred
+                )
+                if preferred_config is not None:
+                    label = preferred_config.name
+        if not label:
             label = await self.hass.async_add_executor_job(
                 product_display_name, discovery_info.get("product_id")
             )
@@ -446,7 +457,9 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                         self.device.set_detected_product_id(
                             self.__discovered_device.get("local_product_id")
                         )
-                await self.async_set_unique_id(get_device_id(user_input))
+                await self.async_set_unique_id(
+                    get_device_id(user_input), raise_on_progress=False
+                )
                 self._abort_if_unique_id_configured()
                 return await self.async_step_select_type()
             else:

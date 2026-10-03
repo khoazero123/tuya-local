@@ -82,7 +82,28 @@ set in the Tuya/SmartLife app is only available from the cloud.
 **Notes:** the cloud call is optional and only happens when a saved login
 exists; device control stays 100% local.
 
-## 4. Local device config: Zitech ZT-Box
+
+## 4. "already_in_progress" when adding a device by hand (2026.9.2.5)
+
+**Problem:** a device that only shows up under "Discovered" has an in-progress
+discovery flow.  Starting "Add device" and entering that same device made HA
+abort with `already_in_progress` (`async_set_unique_id` defaults to
+`raise_on_progress=True`), so the device could not be added by hand until the
+discovery card was dealt with.
+
+**Patch:**
+- `custom_components/tuya_local/config_flow.py`
+  - `async_step_local` now calls
+    `async_set_unique_id(..., raise_on_progress=False)`.  Duplicate *entries*
+    are still prevented by `_abort_if_unique_id_configured()`.
+  - discovered-device labels prefer, in order: the name set in the Tuya app,
+    a config type already in use for the same product id, then the product-id
+    device type — plus the IP.
+- `custom_components/tuya_local/discovery.py`
+  - passes `preferred_type` (a config type already used by a configured device
+    with the same product id) into the discovery flow data.
+
+## 5. Local device config: Zitech ZT-Box
 
 - `custom_components/tuya_local/devices/zitech_ztbox.yaml` — added so a HACS
   update cannot delete it (it previously lived only in `/config`).

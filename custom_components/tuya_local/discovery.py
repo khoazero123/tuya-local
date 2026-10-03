@@ -199,11 +199,27 @@ class TuyaLANRediscovery:
                 if gwid:
                     by_gwid[gwid] = info
 
+            # A device that is still only "discovered" (has an in-progress
+            # discovery flow) must not block the user from adding it by hand:
+            # HA raises already_in_progress for a second flow with the same
+            # unique id, which is confusing.  Duplicate *entries* are still
+            # prevented by _abort_if_unique_id_configured().
             configured = {}
             for entry in self._hass.config_entries.async_entries(DOMAIN):
                 device_id = entry.data.get(CONF_DEVICE_ID)
                 if device_id:
                     configured[device_id] = entry
+
+            # product id -> a config type already in use for that product, so a
+            # new device of the same product can be labelled like its siblings
+            # (the product id alone can match several device configs).
+            product_types = {}
+            for gwid, info in by_gwid.items():
+                entry = configured.get(gwid)
+                product_id = info.get("productKey")
+                config_type = entry.data.get(CONF_TYPE) if entry else None
+                if product_id and config_type:
+                    product_types.setdefault(product_id, config_type)
 
             for gwid, info in by_gwid.items():
                 entry = configured.get(gwid)
@@ -212,7 +228,9 @@ class TuyaLANRediscovery:
                     if not entry.data.get(CONF_DEVICE_CID):
                         await self._check_product(entry, info.get("productKey"))
                 else:
-                    self._discover_new(gwid, info)
+                    self._discover_new(
+                        gwid, info, product_types.get(info.get("productKey"))
+                    )
         finally:
             self._scanning = False
 
@@ -237,7 +255,7 @@ class TuyaLANRediscovery:
         )
 
     @callback
-    def _discover_new(self, gwid, info) -> None:
+    def _discover_new(self, gwid, info, preferred_type=None) -> None:
         """Raise an integration_discovery flow for a not-yet-configured device."""
         if gwid in self._discovered:
             return
@@ -253,6 +271,8 @@ class TuyaLANRediscovery:
                     "version": info.get("version"),
                     # The name set in the Tuya/SmartLife app, when we have it.
                     "name": self._names.get(gwid),
+                    # Config type already used for the same product id, if any.
+                    "preferred_type": preferred_type,
                 },
             )
         )
