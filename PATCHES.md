@@ -153,26 +153,7 @@ source of the local key) was never consulted.
     the cloud device names, so the refresh button works right after a restart
     too.
 
-
-## 8. Auto-match the device type (2026.9.2.11)
-
-**Problem:** the "Choose the type of device" step (1 gang / 2 gang / dual
-switch / single switch ...) always required a decision, and the DP-fit ranking
-alone could put an unrelated config on top (e.g. "Valve controller" for a
-2-gang switch).
-
-**Patch:**
-- `custom_components/tuya_local/config_flow.py`
-  - the discovery step stores the `preferred_type` hint (a config type already
-    used by another device with the same product id);
-  - `async_step_select_type` prefers that hint when its match quality is at
-    least as good as the best DP-fit match, and
-  - **skips the step entirely** when the choice is unambiguous: only one
-    candidate config fits, or a sibling device with the same product id matched
-    this one.  Otherwise the best match is still preselected in the dropdown as
-    before.
-
-## 9. Local device config: Zitech ZT-Box
+## 8. Local device config: Zitech ZT-Box
 
 - `custom_components/tuya_local/devices/zitech_ztbox.yaml` — added so a HACS
   update cannot delete it (it previously lived only in `/config`).
