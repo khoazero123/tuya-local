@@ -142,7 +142,7 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
 
                     if self.cloud.is_authenticated:
                         self.__cloud_devices = await self.cloud.async_get_devices()
-                        return await self.async_step_choose_device()
+                        return await self._async_continue_after_login()
                 except Exception as e:
                     # Re-authentication is needed.
                     _LOGGER.warning("Connection test failed with %s %s", type(e), e)
@@ -247,9 +247,20 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
             )
 
         self.__cloud_devices = await self.cloud.async_get_devices()
+        return await self._async_continue_after_login()
+
+    async def _async_continue_after_login(self) -> FlowResult:
+        """Continue after a cloud login.
+
+        When the flow was started from a LAN-discovered device, use that device
+        and skip the cloud device list, so the user is not asked to choose the
+        device a second time (the shortcut previously only existed on the QR
+        scan path, so a cached login sent the user back to "Choose the device
+        to add").
+        """
         if self.__discovered_device:
-            # If local discovery already found a device, we can skip the choose device step
-            # after updating discovery_info.
+            # If local discovery already found a device, we can skip the choose
+            # device step after updating discovery_info.
             device_choice = self.__cloud_devices.get(self.__discovered_device["id"])
             if device_choice:
                 self.__discovered_device[CONF_LOCAL_KEY] = device_choice.get(

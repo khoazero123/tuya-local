@@ -103,7 +103,22 @@ discovery card was dealt with.
   - passes `preferred_type` (a config type already used by a configured device
     with the same product id) into the discovery flow data.
 
-## 5. Local device config: Zitech ZT-Box
+
+## 5. Adding a discovered device asked to choose it again (2026.9.2.7)
+
+**Problem:** starting the add flow from a "Discovered" card and picking the cloud
+path asked "Choose the device to add" even though the device was already known
+from the LAN scan.  The "use the discovered device and skip the cloud list"
+shortcut only existed on the QR scan path, so a cached cloud login (or any
+login that did not go through the scan step) fell through to the cloud device
+list.
+
+**Patch:**
+- `custom_components/tuya_local/config_flow.py`
+  - the shortcut is factored into `_async_continue_after_login()` and used both
+    after the QR scan and when an existing (cached) login is reused.
+
+## 6. Local device config: Zitech ZT-Box
 
 - `custom_components/tuya_local/devices/zitech_ztbox.yaml` — added so a HACS
   update cannot delete it (it previously lived only in `/config`).
