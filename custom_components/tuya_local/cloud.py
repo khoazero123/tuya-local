@@ -240,6 +240,28 @@ class Cloud:
 
         return cloud_devices
 
+    async def async_get_device_names(self) -> dict[str, str]:
+        """Return {device_id: name} for the devices on the account.
+
+        ``name`` is the name the user set in the Tuya/SmartLife app, which is
+        only available from the cloud (the local protocol carries no name).
+        """
+        token_listener = TokenListener(self.__hass, self.__authentication)
+        manager = Manager(
+            TUYA_CLIENT_ID,
+            self.__authentication["user_code"],
+            self.__authentication["terminal_id"],
+            self.__authentication["endpoint"],
+            self.__authentication["token_info"],
+            token_listener,
+        )
+        await self.__hass.async_add_executor_job(manager.update_device_cache)
+        return {
+            device.id: device.name
+            for device in manager.device_map.values()
+            if getattr(device, "name", None)
+        }
+
     async def async_get_datamodel(self, device_id) -> dict[str, Any] | None:
         """Get the data model for the specified device (QueryThingsDataModel)."""
         token_listener = TokenListener(self.__hass, self.__authentication)

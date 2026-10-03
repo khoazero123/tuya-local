@@ -89,12 +89,15 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
             "local_product_id": discovery_info.get("product_id"),
             CONF_LOCAL_KEY: "",
         }
-        # Label the Discovered card with the device type (looked up from the
-        # product id in the shipped device configs) as well as the IP, since
-        # an IP alone makes it impossible to tell which device is which.
-        label = await self.hass.async_add_executor_job(
-            product_display_name, discovery_info.get("product_id")
-        )
+        # Label the Discovered card with the name set in the Tuya/SmartLife app
+        # when the cloud list is cached, otherwise with the device type looked
+        # up from the product id, plus the IP (an IP alone makes it impossible
+        # to tell which device is which).
+        label = discovery_info.get("name")
+        if not label:
+            label = await self.hass.async_add_executor_job(
+                product_display_name, discovery_info.get("product_id")
+            )
         self.context["title_placeholders"] = {
             "name": " · ".join(
                 part

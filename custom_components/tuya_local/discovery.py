@@ -96,6 +96,8 @@ class TuyaLANRediscovery:
         self._warned_products = set()
         # gwIds an integration_discovery flow has already been raised for.
         self._discovered = set()
+        # {device_id: app name} from the cloud, when available.
+        self._names: dict[str, str] = {}
 
     @callback
     def async_start(self) -> None:
@@ -184,6 +186,9 @@ class TuyaLANRediscovery:
             return
         self._scanning = True
         try:
+            from .refresh import async_get_names
+
+            self._names = await async_get_names(self._hass)
             found = await self._hass.async_add_executor_job(_scan_all)
             if not found:
                 return
@@ -246,9 +251,16 @@ class TuyaLANRediscovery:
                     CONF_HOST: info.get("ip"),
                     "product_id": info.get("productKey"),
                     "version": info.get("version"),
+                    # The name set in the Tuya/SmartLife app, when we have it.
+                    "name": self._names.get(gwid),
                 },
             )
         )
+
+    async def async_scan_now(self) -> None:
+        """Run the full discovery scan immediately (on-demand refresh)."""
+        self._discovered.clear()
+        await self._async_discovery_scan()
 
 
 async def async_start_discovery(hass: HomeAssistant) -> None:

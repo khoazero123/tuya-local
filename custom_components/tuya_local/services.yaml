@@ -1,3 +1,5 @@
+refresh_devices:
+  fields: {}
 send_learned_ir_command:
   target:
     entity:

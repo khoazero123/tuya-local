@@ -49,7 +49,40 @@ the IP address, so it was impossible to tell which device was which.
     `"<device name> · <ip>"` (falls back to the device id when the product id is
     unknown).
 
-## 3. Local device config: Zitech ZT-Box
+
+## 3. Refresh device list (service + button) and cloud device names (2026.9.2.4)
+
+**Problem:** when a device's LAN IP changes (DHCP, power cut) the stored host
+goes stale and the entry sits in "device offline" until reconfigured by hand.
+Discovered cards also only had the device *type* name, while the name the user
+set in the Tuya/SmartLife app is only available from the cloud.
+
+**Patch:**
+- `custom_components/tuya_local/refresh.py` (new)
+  - `tuya_local.refresh_devices` service (also usable as an action from
+    automations): re-locates every configured device on the LAN **by device id**
+    and updates the stored host when it changed (the entry reloads itself),
+    refreshes the cloud device-name cache, and re-runs the LAN discovery scan.
+    Returns a summary (relocated / unchanged / not_found / cloud_names).
+  - caches `{device_id: app name}` in `/config/.storage/tuya_local.cloud_names`
+    (private), fetched from the cloud only when a saved login exists.
+- `custom_components/tuya_local/button.py`
+  - adds an integration level **"Refresh device list"** button
+    (`button.tuya_local_refresh_device_list`) on a "Tuya Local" service device,
+    created once; it calls the service above.
+- `custom_components/tuya_local/cloud.py`
+  - `async_get_device_names()` returns the app names from the cloud list.
+- `custom_components/tuya_local/discovery.py`
+  - discovery flow data now carries the cached app name, and
+    `async_scan_now()` allows an on-demand rescan.
+- `custom_components/tuya_local/config_flow.py`
+  - discovered-device label prefers the app name, falling back to the
+    product-id device type, plus the IP.
+
+**Notes:** the cloud call is optional and only happens when a saved login
+exists; device control stays 100% local.
+
+## 4. Local device config: Zitech ZT-Box
 
 - `custom_components/tuya_local/devices/zitech_ztbox.yaml` — added so a HACS
   update cannot delete it (it previously lived only in `/config`).

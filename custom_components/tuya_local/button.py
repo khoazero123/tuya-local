@@ -5,7 +5,9 @@ Setup for different kinds of Tuya button devices
 import logging
 
 from homeassistant.components.button import ButtonDeviceClass, ButtonEntity
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 
+from .const import DOMAIN
 from .device import TuyaLocalDevice
 from .entity import TuyaLocalEntity
 from .helpers.config import async_tuya_setup_platform
@@ -13,8 +15,17 @@ from .helpers.device_config import TuyaEntityConfig
 
 _LOGGER = logging.getLogger(__name__)
 
+HUB_BUTTON_CREATED = "hub_button_created"
+
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
+    # The integration level "Refresh device list" button: created once, from
+    # whichever config entry loads the button platform first.
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if not domain_data.get(HUB_BUTTON_CREATED):
+        domain_data[HUB_BUTTON_CREATED] = True
+        async_add_entities([TuyaLocalRefreshButton()])
+
     config = {**config_entry.data, **config_entry.options}
     await async_tuya_setup_platform(
         hass,
@@ -23,6 +34,31 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         "button",
         TuyaLocalButton,
     )
+
+
+class TuyaLocalRefreshButton(ButtonEntity):
+    """Integration level button that refreshes the device list.
+
+    Relocates configured devices whose LAN IP changed, refreshes the device
+    names from the Tuya cloud and re-runs the LAN discovery scan.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Refresh device list"
+    _attr_unique_id = "tuya_local_refresh_devices"
+    _attr_icon = "mdi:refresh"
+    _attr_device_info = DeviceInfo(
+        identifiers={(DOMAIN, "hub")},
+        name="Tuya Local",
+        manufacturer="tuya-local",
+        entry_type=DeviceEntryType.SERVICE,
+    )
+
+    async def async_press(self) -> None:
+        """Handle the button press."""
+        await self.hass.services.async_call(
+            DOMAIN, "refresh_devices", {}, blocking=True
+        )
 
 
 class TuyaLocalButton(TuyaLocalEntity, ButtonEntity):
