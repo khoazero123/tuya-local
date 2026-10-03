@@ -57,6 +57,9 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
     CONNECTION_CLASS = CONN_CLASS_LOCAL_PUSH
     device = None
     data = {}
+    # Config type already used by another device with the same product id, set
+    # by the discovery step and used to pick the device type automatically.
+    __preferred_type = None
 
     __qr_code: str | None = None
     __cloud_devices: dict[str, Any] = {}
@@ -123,6 +126,7 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
         # made this look identical to the bulk "Add device" flow).  A saved
         # cloud login is used to fill in the local key when one is available,
         # so make sure the saved login is loaded first.
+        self.__preferred_type = discovery_info.get("preferred_type")
         await async_restore_auth(self.hass)
         self.init_cloud()
         try:
@@ -558,6 +562,18 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
         all_matches.sort(key=lambda x: x[1], reverse=True)
         type_options = [opt for opt, _ in all_matches]
 
+        # A config type already used by another device with the same product id
+        # is a better hint than the DP-fit ranking alone, which can put an
+        # unrelated config on top (e.g. a valve controller for a 2-gang switch).
+        if self.__preferred_type:
+            for opt, q in all_matches:
+                if opt["value"].split("||", 1)[0] == self.__preferred_type:
+                    if q >= best_match:
+                        best_match = q
+                        best_matching_key = opt["value"]
+                        best_matching_type = self.__preferred_type
+                    break
+
         best_match = int(best_match)
         dps = self.device._get_cached_state()
         if self.__discovered_device:
@@ -605,6 +621,24 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
             "Include the previous log messages with any new device request to https://github.com/make-all/tuya-local/issues/",
         )
         if type_options:
+            # Choose automatically when the answer is clear: only one candidate
+            # fits, or a sibling device with the same product id matched this
+            # one, so there is nothing for the user to decide.
+            if len(type_options) == 1 or (
+                self.__preferred_type and best_match >= 101
+            ):
+                parts = best_matching_key.split("||", 2)
+                self.data[CONF_TYPE] = parts[0]
+                if len(parts) > 1 and parts[1]:
+                    self.data[CONF_MANUFACTURER] = parts[1]
+                if len(parts) > 2 and parts[2]:
+                    self.data[CONF_MODEL] = parts[2]
+                _LOGGER.warning(
+                    "Auto-selected device type %s (match quality %d%%)",
+                    best_matching_type,
+                    best_match,
+                )
+                return await self.async_step_choose_entities()
             detected = getattr(self, "_auto_detected_protocol", None)
             schema = vol.Schema(
                 {
