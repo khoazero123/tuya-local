@@ -2,6 +2,7 @@ import logging
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 from tuya_sharing import (
     CustomerDevice,
     LoginControl,
@@ -27,6 +28,15 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# --- Local patch: persist the Tuya cloud login so QR/user-code re-auth is not
+# --- needed after every Home Assistant restart. Stored in
+# --- /config/.storage/tuya_local.cloud_auth (private, mode 0600).
+STORAGE_KEY = f"{DOMAIN}.cloud_auth"
+STORAGE_VERSION = 1
+AUTH_CACHE = "auth_cache"
+AUTH_RESTORED = "auth_restored"
+AUTH_STORE = "auth_store"
+
 HUB_CATEGORIES = [
     "wgsxj",  # Gateway camera
     "lyqwg",  # Router
@@ -44,6 +54,51 @@ HUB_CATEGORIES = [
 ]
 
 
+def _get_auth_store(hass: HomeAssistant) -> Store:
+    """Return the persistent store used for the cloud authentication cache."""
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    store = domain_data.get(AUTH_STORE)
+    if store is None:
+        store = Store(hass, STORAGE_VERSION, STORAGE_KEY, private=True)
+        domain_data[AUTH_STORE] = store
+    return store
+
+
+async def async_restore_auth(hass: HomeAssistant) -> None:
+    """Load a saved cloud login from disk into hass.data (once per session)."""
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if domain_data.get(AUTH_RESTORED):
+        return
+    domain_data[AUTH_RESTORED] = True
+    if domain_data.get(AUTH_CACHE):
+        return
+    try:
+        cached = await _get_auth_store(hass).async_load()
+    except Exception as err:  # noqa: BLE001 - never block setup on cache issues
+        _LOGGER.warning("Could not restore saved Tuya cloud login: %s", err)
+        return
+    if cached:
+        domain_data[AUTH_CACHE] = cached
+        _LOGGER.info(
+            "Restored saved Tuya cloud login (user code %s)",
+            cached.get("user_code"),
+        )
+
+
+def async_save_auth(hass: HomeAssistant, auth: dict[str, Any] | None) -> None:
+    """Cache the cloud login in memory and persist (or clear) it on disk.
+
+    Must be called from the event loop thread.
+    """
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    domain_data[AUTH_CACHE] = auth
+    store = _get_auth_store(hass)
+    if auth:
+        hass.async_create_task(store.async_save(auth))
+    else:
+        hass.async_create_task(store.async_remove())
+
+
 class Cloud:
     """Optional Tuya cloud interface for getting device information."""
 
@@ -56,7 +111,7 @@ class Cloud:
         self.__error_code = None
         self.__error_msg = None
         # Restore cached authentication
-        if cached := self.__hass.data[DOMAIN].get("auth_cache"):
+        if cached := self.__hass.data.get(DOMAIN, {}).get(AUTH_CACHE):
             self.__authentication = cached
 
     async def async_get_qr_code(self, user_code: str | None = None) -> bool:
@@ -109,19 +164,20 @@ class Cloud:
                     "refresh_token": info["refresh_token"],
                 },
             }
-            self.__hass.data[DOMAIN]["auth_cache"] = self.__authentication
+            # Local patch: keep the login in memory and on disk.
+            async_save_auth(self.__hass, self.__authentication)
         else:
             _LOGGER.warning("Login failed: %s", info)
             self.__error_code = info.get(TUYA_RESPONSE_CODE, {})
             self.__error_msg = info.get(TUYA_RESPONSE_MSG, "Unknown error")
             # Ensure expired authentication is cleared on next attempt
-            self.__hass.data[DOMAIN]["auth_cache"] = None
+            async_save_auth(self.__hass, None)
             self.__authentication = {}
         return success
 
     async def async_get_devices(self) -> dict[str, Any]:
         """Get all devices associated with the account."""
-        token_listener = TokenListener(self.__hass)
+        token_listener = TokenListener(self.__hass, self.__authentication)
         manager = Manager(
             TUYA_CLIENT_ID,
             self.__authentication["user_code"],
@@ -186,7 +242,7 @@ class Cloud:
 
     async def async_get_datamodel(self, device_id) -> dict[str, Any] | None:
         """Get the data model for the specified device (QueryThingsDataModel)."""
-        token_listener = TokenListener(self.__hass)
+        token_listener = TokenListener(self.__hass, self.__authentication)
         manager = Manager(
             TUYA_CLIENT_ID,
             self.__authentication["user_code"],
@@ -219,8 +275,8 @@ class Cloud:
     def logout(self) -> None:
         """Logout from the Tuya cloud."""
         _LOGGER.debug("Logging out from Tuya cloud")
-        # Clear authentication cache
-        self.__hass.data[DOMAIN]["auth_cache"] = None
+        # Clear authentication cache (memory and disk)
+        async_save_auth(self.__hass, None)
         self.__authentication = {}
 
     @property
@@ -281,11 +337,22 @@ class DeviceListener(SharingDeviceListener):
 
 class TokenListener(SharingTokenListener):
     """Listener for upstream token updates.
-    This is only needed to get some debug output when tokens are refreshed."""
 
-    def __init__(self, hass: HomeAssistant):
+    Also persists refreshed tokens so the saved login keeps working across
+    restarts for as long as Tuya accepts the refresh token.
+    """
+
+    def __init__(self, hass: HomeAssistant, auth: dict[str, Any] | None = None):
         self.__hass = hass
+        self.__auth = auth
 
     def update_token(self, token_info: dict[str, Any]) -> None:
         """Update the token information."""
         _LOGGER.debug("Token updated")
+        if self.__auth is None:
+            return
+        self.__auth["token_info"] = dict(token_info)
+        # Called from an executor thread, so hand back to the event loop.
+        self.__hass.loop.call_soon_threadsafe(
+            async_save_auth, self.__hass, self.__auth
+        )

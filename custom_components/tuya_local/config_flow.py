@@ -25,7 +25,7 @@ from homeassistant.helpers.selector import (
 )
 
 from . import DOMAIN
-from .cloud import Cloud
+from .cloud import Cloud, async_restore_auth
 from .const import (
     API_PROTOCOL_VERSIONS,
     CONF_DEVICE_CID,
@@ -101,6 +101,10 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
             self.hass.data[DOMAIN] = {}
         if self.hass.data[DOMAIN].get(DATA_STORE) is None:
             self.hass.data[DOMAIN][DATA_STORE] = {}
+
+        # Local patch: load a previously saved cloud login from disk so that
+        # adding a device after a restart does not need a new QR/user-code login.
+        await async_restore_auth(self.hass)
 
         if user_input is not None:
             mode = user_input.get("setup_mode")
