@@ -254,10 +254,26 @@ class TuyaLANRediscovery:
             config_type,
         )
 
+    def _flow_in_progress(self, device_id) -> bool:
+        """Whether a config flow for this device id is already in progress.
+
+        Re-raising a discovery flow for a device that already has one makes HA
+        abort with ``already_in_progress``, which surfaces as a confusing error
+        in the UI, so check first.
+        """
+        for flow in self._hass.config_entries.flow.async_progress():
+            if flow.get("handler") != DOMAIN:
+                continue
+            if flow.get("context", {}).get("unique_id") == device_id:
+                return True
+        return False
+
     @callback
     def _discover_new(self, gwid, info, preferred_type=None) -> None:
         """Raise an integration_discovery flow for a not-yet-configured device."""
         if gwid in self._discovered:
+            return
+        if self._flow_in_progress(gwid):
             return
         self._discovered.add(gwid)
         self._hass.async_create_task(
