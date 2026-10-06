@@ -1,5 +1,31 @@
 ![logo](custom_components/tuya_local/brand/icon.svg) 
 
+![GitHub release](https://img.shields.io/github/v/release/khoazero123/tuya-local?include_prereleases&label=release&color=blue)
+[![License](https://img.shields.io/github/license/khoazero123/tuya-local)](LICENSE.md)
+![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2026.8.0%2B-blue)
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz/)
+![Project stage](https://img.shields.io/badge/project%20stage-fork%20with%20local%20patches-orange)
+
+> ### Fork notice
+> This is [khoazero123](https://github.com/khoazero123)'s fork of
+> [make-all/tuya-local](https://github.com/make-all/tuya-local). Device control
+> stays fully local; the fork adds **local patches** on top of upstream:
+>
+> 1. **Persist the Tuya cloud-assisted login** across Home Assistant restarts
+>    (`/config/.storage/tuya_local.cloud_auth`).
+> 2. Show the **device name on "Discovered" cards**, and keep those cards after a
+>    restart, with the local key pre-filled.
+> 3. **Refresh** service + button for the device list and cloud device names.
+> 4. Fixes for the `already_in_progress` and "choose the device again" add flows.
+> 5. Extra/updated **device profiles** (Zitech ZT-Box, Ecostrad iQ Ceramic v2,
+>    Rohnson R-28858, Yu Prime laundry rack, Earu DP circuit breaker, …).
+>
+> The patches live on the [`local-patches`](https://github.com/khoazero123/tuya-local/tree/local-patches)
+> branch and are documented in [PATCHES.md](https://github.com/khoazero123/tuya-local/blob/local-patches/PATCHES.md);
+> releases are cut from that branch, so HACS updates keep the patches. Fork
+> issues: [khoazero123/tuya-local/issues](https://github.com/khoazero123/tuya-local/issues) —
+> upstream issues belong to [make-all/tuya-local](https://github.com/make-all/tuya-local/issues).
+
 Please report any [issues](https://github.com/make-all/tuya-local/issues) and feel free to raise [pull requests](https://github.com/make-all/tuya-local/pulls).
 [Many others](https://github.com/make-all/tuya-local/blob/main/ACKNOWLEDGEMENTS.md) have contributed their help already.
 
@@ -41,7 +67,11 @@ follow the [instructions for adding a custom
 repository](https://hacs.xyz/docs/faq/custom_repositories) and then
 the integration will be available to install like any other.
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=make-all&repository=tuya-local&category=integration)
+Add the custom repository `https://github.com/khoazero123/tuya-local` with category
+**Integration**, then install **Tuya Local** and restart Home Assistant. Installing
+this fork is what gives you the local patches listed above.
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=khoazero123&repository=tuya-local&category=integration)
 
 ## Configuration
 
@@ -60,7 +90,7 @@ The first choice essentially automates all the manual steps of the second and wi
 
 The cloud assisted choice will guide you through authenticating, choosing a device to add from the list of devices associated with your Tuya account, locate the device on your local subnet and then drop you into [Stage One](#stage-one) with fully populated data necessary to move forward to [Stage Two](#stage-two).
 
-The Tuya authentication token expires after a small number of hours and so is not saved by the integration. But, as long as you don't restart Home Assistant, this allows you to add multiple devices one after another only needing to authenticate once for the first one.
+The Tuya authentication token expires after a small number of hours. Upstream does not save it, so a restart means authenticating again — **this fork persists the session** to `/config/.storage/tuya_local.cloud_auth` (mode 0600) and restores it on startup, so authenticating once is enough and you can add devices one after another at any time. Treat that file as a secret (it holds Tuya access/refresh tokens and is included in Home Assistant backups); if Tuya rejects the saved token, the flow falls back to the normal user code + QR login.
 
 ### Stage One
 
