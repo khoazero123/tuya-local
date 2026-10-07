@@ -30,6 +30,7 @@ from .const import (
     API_PROTOCOL_VERSIONS,
     CONF_DEVICE_CID,
     CONF_DEVICE_ID,
+    CONF_IR2MQTT_BRIDGE,
     CONF_LOCAL_KEY,
     CONF_MANUFACTURER,
     CONF_MODEL,
@@ -703,6 +704,9 @@ class OptionsFlowHandler(OptionsFlow):
             vol.Required(
                 CONF_POLL_ONLY, default=config.get(CONF_POLL_ONLY, False)
             ): bool,
+            vol.Optional(
+                CONF_IR2MQTT_BRIDGE, default=config.get(CONF_IR2MQTT_BRIDGE, "")
+            ): str,
         }
         cfg = await self.hass.async_add_executor_job(
             get_config,

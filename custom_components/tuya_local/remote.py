@@ -33,10 +33,12 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from .const import CONF_IR2MQTT_BRIDGE, DOMAIN
 from .device import TuyaLocalDevice
 from .entity import TuyaLocalEntity
-from .helpers.config import async_tuya_setup_platform
+from .helpers.config import async_tuya_setup_platform, get_device_id
 from .helpers.device_config import TuyaEntityConfig
+from .ir2mqtt_bridge import IR2MQTTBridge
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -87,6 +89,15 @@ SERVICE_DELETE_SCHEMA = COMMAND_SCHEMA.extend(
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
     config = {**config_entry.data, **config_entry.options}
+    # IR2MQTT bridge: option được lưu trên device để entity đọc khi add
+    bridge_id = config.get(CONF_IR2MQTT_BRIDGE)
+    if bridge_id:
+        try:
+            device = hass.data[DOMAIN][get_device_id(config)]["device"]
+            device.ir2mqtt_bridge_id = bridge_id
+            _LOGGER.info("IR2MQTT bridge '%s' gán cho %s", bridge_id, device.name)
+        except KeyError:
+            _LOGGER.warning("IR2MQTT bridge '%s': không tìm thấy device", bridge_id)
     await async_tuya_setup_platform(
         hass,
         async_add_entities,
@@ -134,6 +145,38 @@ class TuyaLocalRemote(TuyaLocalEntity, RemoteEntity):
         self._flags = defaultdict(int)
         self._lock = asyncio.Lock()
         self._attr_is_on = True
+        self._ir2mqtt_bridge = None
+
+    # ------------------------------------------------------------------ IR2MQTT
+    async def async_added_to_hass(self):
+        """Khởi động IR2MQTT bridge nếu config entry có option ir2mqtt_bridge."""
+        await super().async_added_to_hass()
+        bridge_id = getattr(self._device, "ir2mqtt_bridge_id", None)
+        if bridge_id and self._send_dp and self._receive_dp:
+            self._ir2mqtt_bridge = IR2MQTTBridge(
+                self._device._hass,
+                self,
+                bridge_id,
+                name=f"{self._device.name} IR",
+            )
+            await self._ir2mqtt_bridge.async_start()
+
+    async def async_will_remove_from_hass(self):
+        if self._ir2mqtt_bridge is not None:
+            await self._ir2mqtt_bridge.async_stop()
+            self._ir2mqtt_bridge = None
+        await super().async_will_remove_from_hass()
+
+    def on_receive(self, dps, full_poll):
+        """Đẩy mã IR nhận được (DP receive) lên IR2MQTT khi bridge đang bật."""
+        bridge = self._ir2mqtt_bridge
+        if bridge is None or self._receive_dp is None:
+            return
+        value = dps.get(self._receive_dp.id, dps.get(str(self._receive_dp.id)))
+        if value:
+            self._device._hass.async_create_task(
+                bridge.async_publish_received(str(value))
+            )
 
     async def _async_load_storage(self):
         """Load stored codes and flags from disk."""

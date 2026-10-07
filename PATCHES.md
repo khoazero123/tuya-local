@@ -161,6 +161,21 @@ source of the local key) was never consulted.
 - `custom_components/tuya_local/devices/zitech_ztbox.yaml` — added so a HACS
   update cannot delete it (it previously lived only in `/config`).
 
+- **IR2MQTT bridge cho remote IR** (2026-10-07): đưa bridge IR2MQTT vào chính
+  integration để không phải chạy process ngoài.
+  - `custom_components/tuya_local/ir2mqtt_bridge.py` (mới): class `IR2MQTTBridge`
+    (publish retained `ir2mqtt/bridge/<id>/{config,state}`, subscribe `/command`,
+    publish `/received`) + encoder raw/nec/samsung/sony + tách timings >50ms
+    thành nhiều chunk (giống `infrared.py`).
+  - `const.py`: thêm `CONF_IR2MQTT_BRIDGE = "ir2mqtt_bridge"`.
+  - `config_flow.py`: thêm field optional `ir2mqtt_bridge` vào options step
+    (để trống = tắt).
+  - `remote.py`: lưu option lên device trong `async_setup_entry`; entity
+    `async_added_to_hass` start bridge, `async_will_remove_from_hass` stop,
+    `on_receive` đẩy DP receive lên `/received`.
+  - Bật: Settings → Devices & Services → Tuya Local → Configure →
+    ô "IR2MQTT bridge" = id bridge (vd `s06`).
+
 ## Re-basing after an upstream update
 
 ```sh
