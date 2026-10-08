@@ -1209,6 +1209,7 @@ def available_configs():
 
 _product_names = {}
 
+
 def product_display_name(product_id):
     """Look up a human readable name for a Tuya product id in the configs.
 
@@ -1236,6 +1237,7 @@ def product_display_name(product_id):
             break
     _product_names[product_id] = name or ""
     return name
+
 
 def possible_matches(dps, product_ids=None):
     """Return possible matching configs for a given set of

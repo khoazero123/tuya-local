@@ -78,7 +78,9 @@ def encode(protocol: str, payload: dict) -> list[int]:
             int(payload.get("repeats", 0)),
         )
     if p == "samsung":
-        return samsung_pulses(int(str(payload["data"]), 0), int(payload.get("nbits", 32)))
+        return samsung_pulses(
+            int(str(payload["data"]), 0), int(payload.get("nbits", 32))
+        )
     if p == "sony":
         return sony_pulses(int(str(payload["data"]), 0), int(payload.get("nbits", 12)))
     raise ValueError(f"protocol '{protocol}' chưa hỗ trợ")
@@ -90,9 +92,7 @@ def to_b64(pulses: list[int]) -> str:
         pulses = pulses + [5000]
     if not pulses or max(pulses) > 65535:
         raise ValueError(f"timing ngoài uint16: max={max(pulses) if pulses else 0}")
-    return base64.b64encode(
-        struct.pack("<" + str(len(pulses)) + "H", *pulses)
-    ).decode()
+    return base64.b64encode(struct.pack("<" + str(len(pulses)) + "H", *pulses)).decode()
 
 
 def split_for_tuya(pulses: list[int]) -> list[tuple[str, float]]:
@@ -162,8 +162,12 @@ class IR2MQTTBridge:
     # ---- lifecycle
     async def async_start(self) -> None:
         """Publish config/state + subscribe command + vòng lặp nhận IR."""
-        await self._async_publish(f"{self.base}/config", self._config_payload(), retain=True)
-        await self._async_publish(f"{self.base}/state", self._state_payload(), retain=True)
+        await self._async_publish(
+            f"{self.base}/config", self._config_payload(), retain=True
+        )
+        await self._async_publish(
+            f"{self.base}/state", self._state_payload(), retain=True
+        )
         self._unsub = await mqtt.async_subscribe(
             self.hass, f"{self.base}/command", self._handle_command, qos=0
         )
@@ -190,11 +194,15 @@ class IR2MQTTBridge:
         _LOGGER.info("IR2MQTT bridge '%s' stopped", self.bridge_id)
 
     # ---- helpers
-    async def _async_publish(self, topic: str, payload: str, retain: bool = False) -> None:
+    async def _async_publish(
+        self, topic: str, payload: str, retain: bool = False
+    ) -> None:
         try:
             await mqtt.async_publish(self.hass, topic, payload, qos=0, retain=retain)
         except Exception as err:  # noqa: BLE001
-            _LOGGER.warning("IR2MQTT bridge '%s': publish %s lỗi: %s", self.bridge_id, topic, err)
+            _LOGGER.warning(
+                "IR2MQTT bridge '%s': publish %s lỗi: %s", self.bridge_id, topic, err
+            )
 
     def _config_payload(self) -> str:
         device = self.entity._device
@@ -219,12 +227,16 @@ class IR2MQTTBridge:
             {"type": "state", "online": True, "enabled_protocols": self.protocols}
         )
 
-    async def _async_respond(self, request_id: Any, success: bool, message: str = "") -> None:
+    async def _async_respond(
+        self, request_id: Any, success: bool, message: str = ""
+    ) -> None:
         if request_id is None:
             return
         await self._async_publish(
             f"{self.base}/response",
-            json.dumps({"request_id": request_id, "success": success, "message": message}),
+            json.dumps(
+                {"request_id": request_id, "success": success, "message": message}
+            ),
         )
 
     # ---- host -> bridge
@@ -235,7 +247,7 @@ class IR2MQTTBridge:
     async def _async_handle_command(self, raw_payload) -> None:
         try:
             data = json.loads(raw_payload)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             _LOGGER.warning("IR2MQTT bridge '%s': payload JSON lỗi", self.bridge_id)
             return
         cmd = data.get("command")
@@ -256,23 +268,35 @@ class IR2MQTTBridge:
                         await asyncio.sleep(delay)
                 _LOGGER.debug(
                     "IR2MQTT bridge '%s': send %s (%d timings, %d chunk)",
-                    self.bridge_id, protocol, len(pulses), len(chunks),
+                    self.bridge_id,
+                    protocol,
+                    len(pulses),
+                    len(chunks),
                 )
                 await self._async_respond(rid, True)
             except Exception as err:  # noqa: BLE001
                 _LOGGER.warning(
-                    "IR2MQTT bridge '%s': send %s lỗi: %s", self.bridge_id, protocol, err
+                    "IR2MQTT bridge '%s': send %s lỗi: %s",
+                    self.bridge_id,
+                    protocol,
+                    err,
                 )
                 await self._async_respond(rid, False, str(err))
         elif cmd == "set_protocols":
             self.protocols = data.get("protocols", self.protocols)
-            await self._async_publish(f"{self.base}/state", self._state_payload(), retain=True)
+            await self._async_publish(
+                f"{self.base}/state", self._state_payload(), retain=True
+            )
             await self._async_respond(rid, True)
         elif cmd in ("get_state", "ping"):
-            await self._async_publish(f"{self.base}/state", self._state_payload(), retain=True)
+            await self._async_publish(
+                f"{self.base}/state", self._state_payload(), retain=True
+            )
             await self._async_respond(rid, True)
         elif cmd == "get_config":
-            await self._async_publish(f"{self.base}/config", self._config_payload(), retain=True)
+            await self._async_publish(
+                f"{self.base}/config", self._config_payload(), retain=True
+            )
             await self._async_respond(rid, True)
         else:
             _LOGGER.debug("IR2MQTT bridge '%s': command lạ '%s'", self.bridge_id, cmd)
@@ -285,7 +309,9 @@ class IR2MQTTBridge:
             await asyncio.sleep(30)
             if self._stopped:
                 return
-            await self._async_publish(f"{self.base}/state", self._state_payload(), retain=True)
+            await self._async_publish(
+                f"{self.base}/state", self._state_payload(), retain=True
+            )
 
     async def _async_receive_loop(self) -> None:
         """Giữ study mode + đọc DP receive, publish /received khi có mã mới."""
@@ -313,7 +339,9 @@ class IR2MQTTBridge:
             except asyncio.CancelledError:
                 raise
             except Exception as err:  # noqa: BLE001
-                _LOGGER.debug("IR2MQTT bridge '%s': receive loop: %s", self.bridge_id, err)
+                _LOGGER.debug(
+                    "IR2MQTT bridge '%s': receive loop: %s", self.bridge_id, err
+                )
             await asyncio.sleep(POLL_INTERVAL)
 
     async def async_publish_received(self, code: str) -> None:
@@ -332,7 +360,9 @@ class IR2MQTTBridge:
         await self._async_publish(f"{self.base}/received", json.dumps(payload))
         _LOGGER.debug(
             "IR2MQTT bridge '%s': received %s (%d timings)",
-            self.bridge_id, payload["protocol"], len(timings),
+            self.bridge_id,
+            payload["protocol"],
+            len(timings),
         )
 
 

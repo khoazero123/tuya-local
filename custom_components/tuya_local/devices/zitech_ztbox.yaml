@@ -1,10 +1,13 @@
 # HA device file cho "Cửa thông minh ZT-Box" (Zitech) — pid bolrg9mcadqiejd0
 # Đặt vào: <config>/custom_components/tuya_local/devices/zitech_ztbox.yaml
-# Chỉ dùng các DP thiết bị THỰC SỰ báo (tuya_local yêu cầu mọi DP non-optional phải tồn tại):
-#   1,2,3,4,16,27,101,104,105,106,107,108,109,110,111,112,113,114,115,118,119,120
+# Chỉ dùng các DP thiết bị THỰC SỰ báo (tuya_local yêu cầu mọi DP non-optional
+# phải tồn tại):
+# 1,2,3,4,16,27,101,104,105,106,107,108,109,110,111,112,113,114,115,118,119,120
 #
-# DP điều khiển: DP1=MỞ, DP2=ĐÓNG, DP3=DỪNG, DP4=KHOÁ, DP114=vị trí 0..100, DP111=hành trình (s)
-# DP104=nút xoá remote, DP110/112/115 = công tắc cấu hình (tên tạm), DP118/119/120 = trạng thái (ro)
+# DP điều khiển: DP1=MỞ, DP2=ĐÓNG, DP3=DỪNG, DP4=KHOÁ, DP114=vị trí 0..100,
+# DP111=hành trình (s)
+# DP104=nút xoá remote, DP110/112/115 = công tắc cấu hình (tên tạm),
+# DP118/119/120 = trạng thái (ro)
 
 name: Zitech ZT-Box
 products:
@@ -53,7 +56,8 @@ entities:
           min: 0
           max: 100
         mapping:
-          # Box báo vị trí NGƯỢC sau khi đảo L/N (0 = mở, 100 = đóng) -> đảo lại cho khớp
+          # Box báo vị trí NGƯỢC sau khi đảo L/N (0 = mở, 100 = đóng) -> đảo lại
+          # cho khớp
           - invert: true
       - id: 114
         type: integer

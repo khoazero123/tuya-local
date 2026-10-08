@@ -35,6 +35,7 @@ NAMES_STORE = "cloud_names_store"
 
 SERVICE_REFRESH_DEVICES = "refresh_devices"
 
+
 def _store(hass: HomeAssistant) -> Store:
     """Return the persistent store used for the cloud device-name cache."""
     domain_data = hass.data.setdefault(DOMAIN, {})
@@ -43,6 +44,7 @@ def _store(hass: HomeAssistant) -> Store:
         store = Store(hass, STORAGE_VERSION, STORAGE_KEY, private=True)
         domain_data[NAMES_STORE] = store
     return store
+
 
 async def async_get_names(hass: HomeAssistant) -> dict[str, str]:
     """Return cached {device_id: name}, loading from disk once per session."""
@@ -59,6 +61,7 @@ async def async_get_names(hass: HomeAssistant) -> dict[str, str]:
         _LOGGER.warning("Could not load cached Tuya device names: %s", err)
     domain_data[NAMES_CACHE] = names
     return names
+
 
 async def async_refresh_names(hass: HomeAssistant) -> dict[str, str] | None:
     """Fetch device names from the Tuya cloud, when a login is available."""
@@ -84,6 +87,7 @@ async def async_refresh_names(hass: HomeAssistant) -> dict[str, str] | None:
     _LOGGER.info("Refreshed %d device names from the Tuya cloud", len(names))
     return names
 
+
 def _scan_lan() -> dict[str, str]:
     """Blocking LAN scan; returns {device_id: ip}."""
     try:
@@ -98,6 +102,7 @@ def _scan_lan() -> dict[str, str]:
         if gwid and ip:
             result[gwid] = ip
     return result
+
 
 async def async_relocate_devices(hass: HomeAssistant) -> dict[str, Any]:
     """Update the stored host of any configured device that changed IP."""
@@ -136,6 +141,7 @@ async def async_relocate_devices(hass: HomeAssistant) -> dict[str, Any]:
 
     return {"moved": moved, "unchanged": unchanged, "not_found": not_found}
 
+
 async def async_handle_refresh_devices(call: ServiceCall) -> dict[str, Any]:
     """Service handler: relocate devices, refresh cloud names, rescan."""
     from .cloud import async_restore_auth
@@ -168,6 +174,7 @@ async def async_handle_refresh_devices(call: ServiceCall) -> dict[str, Any]:
     }
     _LOGGER.info("Refresh device list: %s", result)
     return result
+
 
 async def async_setup_refresh_services(hass: HomeAssistant) -> None:
     """Register the integration level services (once)."""

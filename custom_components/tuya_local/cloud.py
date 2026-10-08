@@ -375,6 +375,4 @@ class TokenListener(SharingTokenListener):
             return
         self.__auth["token_info"] = dict(token_info)
         # Called from an executor thread, so hand back to the event loop.
-        self.__hass.loop.call_soon_threadsafe(
-            async_save_auth, self.__hass, self.__auth
-        )
+        self.__hass.loop.call_soon_threadsafe(async_save_auth, self.__hass, self.__auth)

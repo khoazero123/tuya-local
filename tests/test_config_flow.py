@@ -1694,7 +1694,9 @@ async def test_flow_integration_discovery_shows_user_form(hass):
         },
     )
     assert result["type"] == "form"
-    assert result["step_id"] == "user"
+    # fork: this branch sends discovered devices straight to the
+    # local-key/host details step instead of the generic "user" step.
+    assert result["step_id"] == "local"
 
 
 @pytest.mark.asyncio

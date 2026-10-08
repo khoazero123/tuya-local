@@ -112,9 +112,7 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
             )
         self.context["title_placeholders"] = {
             "name": " · ".join(
-                part
-                for part in (label, discovery_info.get(CONF_HOST))
-                if part
+                part for part in (label, discovery_info.get(CONF_HOST)) if part
             )
             or device_id
         }
@@ -684,6 +682,9 @@ class OptionsFlowHandler(OptionsFlow):
             proto = user_input.get(CONF_PROTOCOL_VERSION)
             if proto != "auto":
                 user_input[CONF_PROTOCOL_VERSION] = float(proto)
+            # Chỉ lưu option khi có giá trị (tránh thêm key rỗng vào entry data)
+            if not user_input.get(CONF_IR2MQTT_BRIDGE):
+                user_input.pop(CONF_IR2MQTT_BRIDGE, None)
             config = {**config, **user_input}
             device = await async_test_connection(config, self.hass)
             if device:

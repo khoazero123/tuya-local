@@ -176,6 +176,20 @@ source of the local key) was never consulted.
   - Bật: Settings → Devices & Services → Tuya Local → Configure →
     ô "IR2MQTT bridge" = id bridge (vd `s06`).
 
+## CI (fork) — ghi chú
+
+Các patch của fork làm lệch một số test/kiểm tra so với upstream; fork giữ CI xanh bằng:
+
+- `button.py`: nút "Refresh device list" (integration level) được đăng ký **sau** khi
+  `async_tuya_setup_platform` chạy xong ⇒ entry có config sai vẫn raise `ValueError`
+  và không đăng ký nút (test upstream `assert_not_called()` giữ nguyên).
+- `tests/test_button.py::test_init_entry_as_secondary`: kỳ vọng
+  `m_add_entities.call_count == 2` (nút của thiết bị + nút hub).
+- `config_flow.py`: option `ir2mqtt_bridge` rỗng thì **không** ghi vào entry data
+  (để `test_options_flow_modifies_config` vẫn khớp dict kỳ vọng).
+- Đã chạy `ruff format` cho các file fork patch (`cloud.py`, `config_flow.py`,
+  `helpers/device_config.py`, `ir2mqtt_bridge.py`, `refresh.py`) để job "Linting" xanh.
+
 ## Re-basing after an upstream update
 
 ```sh

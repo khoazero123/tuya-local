@@ -19,13 +19,6 @@ HUB_BUTTON_CREATED = "hub_button_created"
 
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
-    # The integration level "Refresh device list" button: created once, from
-    # whichever config entry loads the button platform first.
-    domain_data = hass.data.setdefault(DOMAIN, {})
-    if not domain_data.get(HUB_BUTTON_CREATED):
-        domain_data[HUB_BUTTON_CREATED] = True
-        async_add_entities([TuyaLocalRefreshButton()])
-
     config = {**config_entry.data, **config_entry.options}
     await async_tuya_setup_platform(
         hass,
@@ -34,6 +27,14 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         "button",
         TuyaLocalButton,
     )
+
+    # The integration level "Refresh device list" button: created once, from
+    # whichever config entry loads the button platform first (only after the
+    # per-device setup succeeded, so invalid entries don't register it).
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if not domain_data.get(HUB_BUTTON_CREATED):
+        domain_data[HUB_BUTTON_CREATED] = True
+        async_add_entities([TuyaLocalRefreshButton()])
 
 
 class TuyaLocalRefreshButton(ButtonEntity):

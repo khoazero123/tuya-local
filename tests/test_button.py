@@ -37,7 +37,9 @@ async def test_init_entry_as_secondary(hass):
 
     await async_setup_entry(hass, entry, m_add_entities)
     assert type(hass.data[DOMAIN]["dummy"]["button_factory_reset"]) is TuyaLocalButton
-    m_add_entities.assert_called_once()
+    # fork: in addition to the device button, the integration level
+    # "Refresh device list" button is registered from this platform.
+    assert m_add_entities.call_count == 2
 
 
 @pytest.mark.asyncio
