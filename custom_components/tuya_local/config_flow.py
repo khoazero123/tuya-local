@@ -14,6 +14,7 @@ from homeassistant.config_entries import (
 from homeassistant.const import CONF_HOST, CONF_NAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.util import slugify
 from homeassistant.helpers.selector import (
     QrCodeSelector,
     QrCodeSelectorConfig,
@@ -46,6 +47,9 @@ from .helpers.device_config import get_config, product_display_name
 from .helpers.log import log_json
 
 _LOGGER = logging.getLogger(__name__)
+
+IR2MQTT_BRIDGE_OFF = "(tắt)"
+
 DEVICE_DETAILS_URL = (
     "https://github.com/make-all/tuya-local/blob/main/DEVICE_DETAILS.md"
     "#finding-your-device-id-and-local-key"
@@ -683,14 +687,43 @@ class OptionsFlowHandler(OptionsFlow):
             if proto != "auto":
                 user_input[CONF_PROTOCOL_VERSION] = float(proto)
             # Chỉ lưu option khi có giá trị (tránh thêm key rỗng vào entry data)
-            if not user_input.get(CONF_IR2MQTT_BRIDGE):
+            bridge = user_input.get(CONF_IR2MQTT_BRIDGE)
+            if bridge in (None, "", IR2MQTT_BRIDGE_OFF):
                 user_input.pop(CONF_IR2MQTT_BRIDGE, None)
+            else:
+                user_input[CONF_IR2MQTT_BRIDGE] = str(bridge).strip()
             config = {**config, **user_input}
             device = await async_test_connection(config, self.hass)
             if device:
                 return self.async_create_entry(title="", data=user_input)
             else:
                 errors["base"] = "connection"
+
+        # IR2MQTT bridge: select thay vì input — gồm "(tắt)", gợi ý theo tên
+        # thiết bị, id đang dùng, và id của các entry tuya_local khác.
+        current_bridge = config.get(CONF_IR2MQTT_BRIDGE) or ""
+        suggested = slugify(self.config_entry.title or "") or slugify(
+            config.get(CONF_NAME) or ""
+        )
+        bridge_ids: list[str] = []
+        for candidate in (suggested, current_bridge):
+            if candidate and candidate not in bridge_ids:
+                bridge_ids.append(candidate)
+        for other in self.hass.config_entries.async_entries(DOMAIN):
+            if other.entry_id == self.config_entry.entry_id:
+                continue
+            other_id = (other.options or {}).get(CONF_IR2MQTT_BRIDGE)
+            if other_id and other_id not in bridge_ids:
+                bridge_ids.append(other_id)
+        bridge_options = [SelectOptionDict(value=IR2MQTT_BRIDGE_OFF, label="(tắt)")]
+        for bid in bridge_ids:
+            if bid == current_bridge:
+                label = f"{bid} (đang dùng)"
+            elif bid == suggested:
+                label = f"{bid} (theo tên thiết bị)"
+            else:
+                label = f"{bid} (entry khác)"
+            bridge_options.append(SelectOptionDict(value=bid, label=label))
 
         schema = {
             vol.Required(
@@ -706,8 +739,14 @@ class OptionsFlowHandler(OptionsFlow):
                 CONF_POLL_ONLY, default=config.get(CONF_POLL_ONLY, False)
             ): bool,
             vol.Optional(
-                CONF_IR2MQTT_BRIDGE, default=config.get(CONF_IR2MQTT_BRIDGE, "")
-            ): str,
+                CONF_IR2MQTT_BRIDGE,
+                default=current_bridge or IR2MQTT_BRIDGE_OFF,
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=bridge_options,
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            ),
         }
         cfg = await self.hass.async_add_executor_job(
             get_config,

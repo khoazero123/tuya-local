@@ -176,6 +176,24 @@ source of the local key) was never consulted.
   - Bật: Settings → Devices & Services → Tuya Local → Configure →
     ô "IR2MQTT bridge" = id bridge (vd `s06`).
 
+## IR2MQTT bridge — dùng cho mọi thiết bị IR của tuya-local
+
+Module `ir2mqtt_bridge.py` chỉ cần entity `remote` có DP **send** (201) + **receive** (202),
+nên dùng được cho mọi profile IR, ví dụ:
+
+- S06/S18 IR (`basic_ir_remote`), S11 IR+RF (`s11_rfir_remote`), universal remote
+  (`ir_remote_sensors` — bản có cảm biến), WOOX R7246, Moes heatpump, v.v.
+
+Cách bật: **Settings → Devices & Services → Tuya Local → Configure → "IR2MQTT bridge"**
+(chọn từ dropdown: `(tắt)` / id gợi ý theo tên thiết bị / id đang dùng / id của entry khác).
+
+⚠️ **id bridge phải khác nhau giữa các nguồn** — ví dụ bridge `s11` đang do thiết bị S11
+chạy **ESPHome** giữ; nếu thêm một S11 khác (firmware Tuya gốc) thì chọn id khác, ví dụ `s11_oem`.
+
+⚠️ Hiện bridge chỉ hỗ trợ **IR** (raw/nec/samsung/sony). Phần **RF 433 MHz** của S11 chưa được
+đưa vào (profile `s11_rfir_remote` của tuya-local không map DP RF; và hợp đồng JSON của IR2MQTT
+cho RF dùng payload khác — `rf:`/`rfstudy_send`).
+
 ## CI (fork) — ghi chú
 
 Các patch của fork làm lệch một số test/kiểm tra so với upstream; fork giữ CI xanh bằng:
