@@ -14,7 +14,6 @@ from homeassistant.config_entries import (
 from homeassistant.const import CONF_HOST, CONF_NAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
-from homeassistant.util import slugify
 from homeassistant.helpers.selector import (
     QrCodeSelector,
     QrCodeSelectorConfig,
@@ -24,6 +23,7 @@ from homeassistant.helpers.selector import (
     SelectSelectorConfig,
     SelectSelectorMode,
 )
+from homeassistant.util import slugify
 
 from . import DOMAIN
 from .cloud import Cloud, async_restore_auth
