@@ -216,3 +216,25 @@ git checkout -b local-patches-<newver> <newver-tag>
 # re-apply the patches listed above, bump manifest version to <newver>.1,
 # commit, tag, push, create a release
 ```
+
+## 9. IR2MQTT bridge: hỗ trợ RF sub-GHz (2026.10.0.7)
+
+**Vấn đề:** module `ir2mqtt_bridge.py` chỉ encode protocol IR (`nec/samsung/sony/raw`),
+nên khi thiết bị S11 được flash về firmware OEM (dùng Tuya Local làm cầu), các mã
+**RF 433 MHz** (quạt trần) không gửi được.
+
+**Patch:**
+- `custom_components/tuya_local/ir2mqtt_bridge.py`
+  - phát hiện code RF qua `payload["rf"] is True` (fallback `receiver_id == "rf"`),
+    gửi qua entity remote với prefix **`rf:`** (đúng đường `remote.py::_extract_codes`
+    → `_encode_send_code(is_rf=True)` → DP 201 payload `rfstudy_send`);
+  - IR gửi với prefix **`b64:`** (khớp `remote.py`), giữ nguyên hành vi cũ;
+  - mã học được có prefix `rf:` → publish về `.../received` dạng
+    `{"rf": true, "receiver_id": "rf", "timings": [...]}` (bỏ qua `_detect_protocol`).
+- Sửa **bug SyntaxError** ở HEAD: `except ValueError, TypeError:` (cú pháp Python 2)
+  khiến cả platform `remote` fail load; nay là `except (ValueError, TypeError):  # fmt: skip`
+  (`# fmt: skip` bắt buộc vì ruff < 0.17 cắt ngoặc và tái tạo bug).
+- Thêm `tests/test_ir2mqtt_bridge_rf.py` (11 test, chạy độc lập không cần HA/pytest).
+
+**Chưa khép kín:** học RF *qua bridge* vẫn cần dấu hiệu chế độ RF (option mới
+`ir2mqtt_rf` hoặc lệnh MQTT `learn_rf`); send RF đã xong.

@@ -6,6 +6,10 @@ trong HA, dùng chính kết nối Tuya Local sẵn có (không cần process ng
 
 Bật bằng option ``ir2mqtt_bridge`` của config entry (để trống = tắt).
 
+Hỗ trợ cả IR (nec/samsung/sony/raw) và **RF sub-GHz** (protocol ``raw`` + key
+``rf: true``): lệnh gửi RF đi qua entity remote với prefix ``"rf:"``, mã học RF
+publish kèm ``rf: true``/``receiver_id: "rf"``. Xem ``PREFIX_RF``/``is_rf_payload``.
+
 Xem: https://github.com/steelcuts/ir2mqtt_bridge (MANUAL.md) — hợp đồng JSON.
 """
 
@@ -27,6 +31,11 @@ _LOGGER = logging.getLogger(__name__)
 CAPABILITIES = ["nec", "samsung", "sony", "raw"]
 STUDY_REFRESH = 15  # giây: vào lại study mode định kỳ (gửi lệnh có thể thoát study)
 POLL_INTERVAL = 1  # giây: đọc DP receive
+
+# ---- RF (sub-GHz) — hợp đồng đã xác minh với IR2MQTT/remote.py
+RF_RECEIVER_ID = "rf"  # receiver_id IR2MQTT/firmware cũ dùng cho kênh RF
+PREFIX_IR = "b64:"  # remote.py _extract_codes: code IR base64 (DP202)
+PREFIX_RF = "rf:"  # remote.py: code RF -> _encode_send_code(is_rf=True)
 
 
 # --------------------------------------------------------------------- encoders
@@ -84,6 +93,19 @@ def encode(protocol: str, payload: dict) -> list[int]:
     if p == "sony":
         return sony_pulses(int(str(payload["data"]), 0), int(payload.get("nbits", 12)))
     raise ValueError(f"protocol '{protocol}' chưa hỗ trợ")
+
+
+def is_rf_payload(payload: Any) -> bool:
+    """Code gửi có phải RF không.
+
+    Hợp đồng IR2MQTT: code RF mang key ``"rf": true`` (code IR không có key này);
+    ``receiver_id: "rf"`` cũng xuất hiện nên dùng làm dự phòng.
+    """
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("rf") is True:
+        return True
+    return str(payload.get("receiver_id", "")).lower() == RF_RECEIVER_ID
 
 
 def to_b64(pulses: list[int]) -> str:
@@ -245,9 +267,12 @@ class IR2MQTTBridge:
         self.hass.async_create_task(self._async_handle_command(msg.payload))
 
     async def _async_handle_command(self, raw_payload) -> None:
+        # Ngoặc của except là BẮT BUỘC (Python 3): bản gốc thiếu ngoặc
+        # (`except ValueError, TypeError:`) là SyntaxError; ruff format < 0.17
+        # cắt ngoặc nên phải chặn bằng fmt: skip.
         try:
             data = json.loads(raw_payload)
-        except ValueError, TypeError:
+        except (ValueError, TypeError):  # fmt: skip
             _LOGGER.warning("IR2MQTT bridge '%s': payload JSON lỗi", self.bridge_id)
             return
         cmd = data.get("command")
@@ -257,18 +282,22 @@ class IR2MQTTBridge:
             code = data.get("code") or {}
             protocol = code.get("protocol", "raw")
             payload = code.get("payload", {})
+            # RF: payload có rf=true -> gửi qua remote entity với prefix "rf:"
+            is_rf = is_rf_payload(payload)
+            prefix = PREFIX_RF if is_rf else PREFIX_IR
             try:
                 pulses = encode(protocol, payload)
                 chunks = split_for_tuya(pulses)
                 for b64, delay in chunks:
                     await self.entity.async_send_command(
-                        [f"b64:{b64}"], num_repeats=1, delay_secs=0.5
+                        [f"{prefix}{b64}"], num_repeats=1, delay_secs=0.5
                     )
                     if delay:
                         await asyncio.sleep(delay)
                 _LOGGER.debug(
-                    "IR2MQTT bridge '%s': send %s (%d timings, %d chunk)",
+                    "IR2MQTT bridge '%s': send %s%s (%d timings, %d chunk)",
                     self.bridge_id,
+                    "rf/" if is_rf else "",
                     protocol,
                     len(pulses),
                     len(chunks),
@@ -344,7 +373,22 @@ class IR2MQTTBridge:
                 )
             await asyncio.sleep(POLL_INTERVAL)
 
-    async def async_publish_received(self, code: str) -> None:
+    async def async_publish_received(
+        self, code: str, is_rf: bool | None = None
+    ) -> None:
+        """Publish code học được tới ``.../received``.
+
+        ``code`` là chuỗi base64 DP202. Nhánh RF: code mang prefix ``"rf:"``
+        (remote.py ``_async_learn_command``) hoặc truyền ``is_rf=True`` ⇒ publish
+        payload RF đúng hợp đồng IR2MQTT (``rf: true``, ``receiver_id: "rf"``);
+        IR (không prefix) giữ nguyên hành vi cũ.
+        """
+        code = str(code)
+        if code.startswith(PREFIX_RF):
+            code = code[len(PREFIX_RF) :]
+            is_rf = True
+        elif is_rf is None:
+            is_rf = False
         pulses = b64_to_pulses(code)
         if not pulses:
             return
@@ -352,15 +396,24 @@ class IR2MQTTBridge:
         payload: dict[str, Any] = {
             "type": "received",
             "protocol": "raw",
-            "receiver_id": self.receiver_id,
+            "receiver_id": RF_RECEIVER_ID if is_rf else self.receiver_id,
             "timestamp": int(time.time() * 1000),
-            "payload": {"timings": timings},
         }
-        payload.update(_detect_protocol(pulses))
+        if is_rf:
+            # RF: luôn protocol raw, KHÔNG thử nhận diện NEC/Samsung
+            payload["payload"] = {
+                "rf": True,
+                "receiver_id": RF_RECEIVER_ID,
+                "timings": timings,
+            }
+        else:
+            payload["payload"] = {"timings": timings}
+            payload.update(_detect_protocol(pulses))
         await self._async_publish(f"{self.base}/received", json.dumps(payload))
         _LOGGER.debug(
-            "IR2MQTT bridge '%s': received %s (%d timings)",
+            "IR2MQTT bridge '%s': received %s%s (%d timings)",
             self.bridge_id,
+            "rf/" if is_rf else "",
             payload["protocol"],
             len(timings),
         )
