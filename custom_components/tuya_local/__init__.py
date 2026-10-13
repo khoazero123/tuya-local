@@ -30,6 +30,7 @@ from .const import (
 from .device import async_delete_device, get_device_id, setup_device
 from .discovery import async_start_discovery, async_stop_discovery
 from .helpers.device_config import get_config
+from .mobile_api import async_setup_mobile_services
 from .refresh import async_setup_refresh_services
 from .services import async_setup_services
 
@@ -1127,6 +1128,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     await async_setup_services(hass, entities)
     # Integration level services (refresh device list), registered once.
     await async_setup_refresh_services(hass)
+    await async_setup_mobile_services(hass)
 
     entry.add_update_listener(async_update_entry)
 

@@ -1,5 +1,53 @@
 refresh_devices:
   fields: {}
+
+add_device:
+  name: Add device from mobile app
+  description: Create or update a local device using credentials from the Smarthome / Tuya App SDK
+  fields:
+    device_id:
+      required: true
+      example: bfxxxxxxxx
+      selector:
+        text:
+    local_key:
+      required: true
+      selector:
+        text:
+    host:
+      example: 192.168.1.50
+      selector:
+        text:
+    product_id:
+      selector:
+        text:
+    name:
+      selector:
+        text:
+    protocol_version:
+      default: auto
+      example: auto
+      selector:
+        text:
+    poll_only:
+      default: false
+      selector:
+        boolean:
+
+list_configured:
+  name: List configured devices
+  description: Return device_id/host for mobile sync UI
+  fields: {}
+
+sync_cloud_session:
+  name: Sync cloud session from mobile app
+  description: Store App SDK / OpenAPI or sharing auth for later refresh
+  fields:
+    payload:
+      required: true
+      selector:
+        object:
+
 send_learned_ir_command:
   target:
     entity:

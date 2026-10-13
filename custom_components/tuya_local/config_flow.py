@@ -136,6 +136,34 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
             _LOGGER.warning("Could not use the saved Tuya cloud login: %s", e)
         return await self.async_step_local()
 
+    async def async_step_mobile(self, user_input=None):
+        """Programmatic entry from the Smarthome mobile ``add_device`` service.
+
+        Expects a fully populated dict (device_id, host, local_key, type, …).
+        """
+        if user_input is None:
+            return self.async_abort(reason="missing_data")
+
+        device_id = user_input.get(CONF_DEVICE_ID)
+        if not device_id:
+            return self.async_abort(reason="missing_device_id")
+
+        await self.async_set_unique_id(device_id)
+        self._abort_if_unique_id_configured()
+
+        title = user_input.get(CONF_NAME) or f"Tuya {device_id[-6:]}"
+        data = {
+            CONF_DEVICE_ID: device_id,
+            CONF_HOST: user_input[CONF_HOST],
+            CONF_LOCAL_KEY: user_input[CONF_LOCAL_KEY],
+            CONF_PROTOCOL_VERSION: user_input.get(CONF_PROTOCOL_VERSION, 3.3),
+            CONF_POLL_ONLY: user_input.get(CONF_POLL_ONLY, False),
+            CONF_TYPE: user_input[CONF_TYPE],
+        }
+        if user_input.get(CONF_DEVICE_CID):
+            data[CONF_DEVICE_CID] = user_input[CONF_DEVICE_CID]
+        return self.async_create_entry(title=title, data=data)
+
     async def async_step_user(self, user_input=None):
         errors = {}
 
