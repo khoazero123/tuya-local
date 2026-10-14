@@ -1,7 +1,9 @@
 # Local patches in this fork
 
-Base: upstream `2026.10.0` (synced 2026-10-03; the 43 upstream
-commits since `2026.9.2` touch none of the files patched below).
+Base: upstream `2026.10.0` (synced 2026-10-14: 11 upstream commits since
+2026-10-03 — device YAMLs, `DEVICES.md` and `tests/test_entity.py` only, none of
+the files patched below; the earlier 43 commits since `2026.9.2` likewise touch
+none of them).
 
 This fork is based on `make-all/tuya-local`. All local patches live on the
 `local-patches` branch (see `git log` for details); releases are cut from it so
@@ -209,6 +211,15 @@ Các patch của fork làm lệch một số test/kiểm tra so với upstream; 
   `helpers/device_config.py`, `ir2mqtt_bridge.py`, `refresh.py`) để job "Linting" xanh.
 
 ## Re-basing after an upstream update
+
+Sync log:
+
+- **2026-10-14** — merged `upstream/main` (11 commits, `c0fb71b4..95300d05`:
+  EZAIoT Lite socket thermostat, T34-Mini in `relay_switch_remote`, Dreamlight
+  strips, Meaco 16K, Arlec PC193HA, Klarta Stor3 `mild`, Fisher Summer work time,
+  smartplugv2 forced-polling removal, `ci(entity)` fixes) into `local-patches`: no
+  conflicts, no patched file touched. Release `2026.10.0.7` also carries the
+  IR2MQTT RF sub-GHz patch (#9) and the mobile API services commit.
 
 ```sh
 git fetch upstream
