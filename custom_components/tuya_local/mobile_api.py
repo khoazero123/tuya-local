@@ -65,7 +65,9 @@ def _app_session_store(hass: HomeAssistant) -> Store:
     domain_data = hass.data.setdefault(DOMAIN, {})
     store = domain_data.get(APP_SESSION_STORE)
     if store is None:
-        store = Store(hass, APP_SESSION_STORAGE_VERSION, APP_SESSION_STORAGE_KEY, private=True)
+        store = Store(
+            hass, APP_SESSION_STORAGE_VERSION, APP_SESSION_STORAGE_KEY, private=True
+        )
         domain_data[APP_SESSION_STORE] = store
     return store
 
@@ -77,7 +79,9 @@ def _find_entry_by_device_id(hass: HomeAssistant, device_id: str):
     return None
 
 
-async def _resolve_host(hass: HomeAssistant, device_id: str, host: str | None) -> str | None:
+async def _resolve_host(
+    hass: HomeAssistant, device_id: str, host: str | None
+) -> str | None:
     if host:
         return host
     try:
@@ -115,7 +119,7 @@ async def async_handle_add_device(call: ServiceCall) -> dict[str, Any]:
     if protocol not in (None, "auto"):
         try:
             protocol = float(protocol)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError):  # fmt: skip
             protocol = "auto"
 
     host = await _resolve_host(hass, device_id, call.data.get("host"))
@@ -152,8 +156,12 @@ async def async_handle_add_device(call: ServiceCall) -> dict[str, Any]:
         if product_id:
             try:
                 device.set_detected_product_id(product_id)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.debug(
+                    "add_device: set_detected_product_id failed for %s: %s",
+                    product_id,
+                    err,
+                )
         device_type = await device.async_inferred_type()
         # Prefer the protocol the test actually used
         saved_protocol = getattr(device, "_protocol_configured", protocol)
@@ -164,15 +172,13 @@ async def async_handle_add_device(call: ServiceCall) -> dict[str, Any]:
             device._api.set_socketPersistent(False)
             if device._api.parent:
                 device._api.parent.set_socketPersistent(False)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("add_device: could not release the test socket: %s", err)
 
     if not device_type and product_id:
         from .helpers.device_config import possible_matches
 
-        matches = await hass.async_add_executor_job(
-            possible_matches, {}, [product_id]
-        )
+        matches = await hass.async_add_executor_job(possible_matches, {}, [product_id])
         if matches:
             device_type = matches[0].config_type
 
