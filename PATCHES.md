@@ -305,3 +305,62 @@ sweep in #5713 because an unreachable device could be moved to a wrong address.
 - Multi-exception `except` clauses carry `# fmt: skip`: the pinned ruff (0.16.x)
   strips the parentheses, which the Python 3.14 runtime used by Home Assistant
   and CI *accepts* (PEP 758) but which is a SyntaxError on older interpreters.
+## 12. Relocation on a box whose IPs changed before the patch existed (2026.10.0.10)
+
+**Problem:** after `2026.10.0.8` was installed on a second Home Assistant box,
+the devices set up *before* the router reboot stayed "Failed setup, will retry:
+tuya-local device offline" and were never relocated. Two reasons, both in
+patch #10:
+
+1. **A bare TCP answer was taken as proof of identity.** For an entry with no
+   device object (which is what a failed setup leaves behind) the sweep probed
+   the stored address and skipped the entry when *something* answered. After a
+   DHCP reshuffle the stale address is usually held by a **different** device,
+   so the entry was considered healthy and never moved.
+2. **The MAC record did not exist yet.** The store is filled from devices that
+   are already answering, so a box that was patched *after* the addresses changed
+   had nothing to match on, and if the device also ignores the Tuya discovery
+   broadcast there was no evidence at all. Worse, learning ran for every entry:
+   the MAC at a stale address (now another device's) could be recorded as *this*
+   device's MAC, and every later lookup would then follow the wrong device.
+
+**Patch:**
+
+- `custom_components/tuya_local/macmap.py`
+  - a third identity source: `probe_identity()` talks the Tuya protocol to every
+    device answering on the Tuya port and matches the ids it is looking for, so a
+    device is placed by a full handshake with **its own device id and local key**
+    — no MAC record and no discovery broadcast needed. Versions are tried
+    cheapest-first (the entry's own protocol version when it is known), the scan
+    stops as soon as everything is found, and it is throttled
+    (`PROTOCOL_SCAN_INTERVAL`, 10 min) because it is the slow check; the manual
+    `relocate_devices` service bypasses the throttle.
+  - `choose_candidate()` now takes `identified` and trusts the handshake first,
+    then the MAC, then the broadcast;
+  - an entry with **no device object and no recorded MAC** is no longer treated
+    as healthy just because its address answers: it is handed to the verified
+    relocation, which does nothing when the device is already where it should be;
+  - `async_learn_macs()` only learns from entries whose device is *answering its
+    own protocol*, so a stale address held by another device can no longer poison
+    the MAC record;
+  - disabled entries are skipped entirely.
+- `custom_components/tuya_local/refresh.py` — the manual service forces the
+  handshake probe (a button press should not be throttled).
+- tests: `tests/test_macmap.py` (handshake identity, refusal on a used address)
+  and `tests/test_macmap_ha.py` (relocation with no MAC record at all; learning
+  refuses a MAC it cannot attribute; the handshake probe is patched out by
+  default, as it opens sockets).
+
+**Notes:** three independent identities now have to agree before a stored host is
+rewritten, so the #5713 hazard stays closed. Cost is paid only while a device is
+offline: one LAN sweep, and at most one handshake scan per 10 minutes.
+
+## Branches
+
+- ``local-patches`` (the default line, releases ``2026.10.0.11`` and up): upstream
+  plus patches #1-#10 and #12.
+- ``feat/multi-account``: the several-Tuya-accounts work (patch #11), released as
+  ``2026.10.0.9`` / ``2026.10.0.10`` and **kept off the default line on purpose**
+  until it has been in use for a while.  Merging it back brings #11 on top of the
+  default line; patch #12 is already there, so only the accounts files should
+  conflict.

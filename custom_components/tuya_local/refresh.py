@@ -96,7 +96,8 @@ async def async_relocate_devices(hass: HomeAssistant) -> dict[str, Any]:
     Delegates to ``macmap``, where each candidate address is confirmed by MAC
     address before the stored host is rewritten.
     """
-    return await macmap.async_relocate_devices(hass)
+    # Manual use: do not let the throttle hold back the handshake probe.
+    return await macmap.async_relocate_devices(hass, force_protocol=True)
 
 
 async def async_handle_relocate_devices(call: ServiceCall) -> dict[str, Any]:
