@@ -42,8 +42,8 @@ import ipaddress
 import logging
 import re
 import shutil
-import subprocess  # noqa: S404 - fixed argv, no shell
 import socket
+import subprocess  # noqa: S404 - fixed argv, no shell
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
