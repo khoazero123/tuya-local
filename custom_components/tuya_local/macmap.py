@@ -44,6 +44,7 @@ import re
 import shutil
 import socket
 import subprocess  # noqa: S404 - fixed argv, no shell
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -51,7 +52,12 @@ from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
-from .const import CONF_DEVICE_ID, DOMAIN
+from .const import (
+    CONF_DEVICE_ID,
+    CONF_LOCAL_KEY,
+    CONF_PROTOCOL_VERSION,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -70,6 +76,13 @@ TUYA_PORT = 6668
 MAX_HOSTS = 1024
 PROBE_TIMEOUT = 0.4
 PROBE_WORKERS = 128
+
+# Identity probe: talk the Tuya protocol to the devices answering on the LAN and
+# see which id answers. Needs neither a MAC record nor a discovery broadcast,
+# but it is the slowest check, so it runs at most this often per Home Assistant.
+PROTOCOL_PROBE_TIMEOUT = 2.0
+PROTOCOL_SCAN_INTERVAL = 600
+PROTOCOL_SCAN_AT = "macmap_last_protocol_scan"
 
 # Home Assistant's own container networks; never a place where a Tuya device
 # lives, and sweeping them only wastes time.
@@ -258,14 +271,96 @@ def _sweep(hosts: list[str], port: int = TUYA_PORT) -> list[str]:
         return [ip for ip, ok in results if ok]
 
 
+async def async_tuya_addresses(hass: HomeAssistant) -> list[str]:
+    """Return the LAN addresses that accept a connection on the Tuya port."""
+    hosts = _hosts(await async_local_networks(hass))
+    return await hass.async_add_executor_job(_sweep, hosts)
+
+
 async def async_scan_by_mac(hass: HomeAssistant) -> dict[str, str]:
     """Return ``{mac: ip}`` for the Tuya devices answering on the LAN."""
-    hosts = _hosts(await async_local_networks(hass))
-    responders = await hass.async_add_executor_job(_sweep, hosts)
+    responders = await async_tuya_addresses(hass)
     if not responders:
         return {}
     arp = await async_arp_table(hass)
     return {arp[ip]: ip for ip in responders if ip in arp}
+
+
+def probe_identity(
+    candidates: list[str], wanted: dict[str, tuple[str, Any]]
+) -> dict[str, str]:
+    """Return ``{device_id: ip}`` for the devices that answer as themselves.
+
+    Blocking; run in an executor.  The local key is already known, so a device
+    that answers *this* id with state is that device: the handshake proves the
+    identity, which is what a bare TCP answer does not.  Versions are tried
+    cheapest-first and the scan stops as soon as nothing is left to find.
+    """
+    import tinytuya
+
+    found: dict[str, str] = {}
+    pending = dict(wanted)
+    for ip in candidates:
+        if not pending:
+            break
+        for device_id, (local_key, version) in list(pending.items()):
+            if not local_key:
+                pending.pop(device_id, None)
+                continue
+            versions = (
+                [version] if isinstance(version, (int, float)) else [3.3, 3.5, 3.4]
+            )
+            for protocol in versions:
+                try:
+                    device = tinytuya.Device(device_id, ip, local_key, version=protocol)
+                    device.set_socketTimeout(PROTOCOL_PROBE_TIMEOUT)
+                    device.set_socketPersistent(False)
+                    status = device.status()
+                except Exception as err:  # noqa: BLE001 - wrong device or no answer
+                    _LOGGER.debug(
+                        "Identity probe %s @ %s v%s: %s", device_id, ip, protocol, err
+                    )
+                    continue
+                if isinstance(status, dict) and status.get("dps") is not None:
+                    found[device_id] = ip
+                    pending.pop(device_id, None)
+                    _LOGGER.info(
+                        "Identified %s at %s by a Tuya handshake (protocol %s)",
+                        device_id,
+                        ip,
+                        protocol,
+                    )
+                    break
+    return found
+
+
+def _protocol_scan_due(hass: HomeAssistant) -> bool:
+    """Throttle the protocol probe: it is the most expensive check."""
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    last = domain_data.get(PROTOCOL_SCAN_AT) or 0.0
+    if (time.monotonic() - last) < PROTOCOL_SCAN_INTERVAL:
+        return False
+    domain_data[PROTOCOL_SCAN_AT] = time.monotonic()
+    return True
+
+
+async def async_identify_devices(
+    hass: HomeAssistant, entries: list, *, force: bool = False
+) -> dict[str, str]:
+    """Identify configured devices by talking the Tuya protocol to the LAN."""
+    wanted: dict[str, tuple[str, Any]] = {}
+    for entry in entries:
+        device_id = _entry_device_id(entry)
+        local_key = entry.data.get(CONF_LOCAL_KEY)
+        if device_id and local_key:
+            wanted[device_id] = (local_key, entry.data.get(CONF_PROTOCOL_VERSION))
+    if not wanted or not (force or _protocol_scan_due(hass)):
+        return {}
+
+    candidates = await async_tuya_addresses(hass)
+    if not candidates:
+        return {}
+    return await hass.async_add_executor_job(probe_identity, candidates, wanted)
 
 
 def _store(hass: HomeAssistant) -> Store:
@@ -339,10 +434,19 @@ async def async_learn_macs(hass: HomeAssistant) -> int:
 
     macs = dict(await async_load_macs(hass))
     learned = 0
+    domain_data = hass.data.get(DOMAIN, {})
     for entry in hass.config_entries.async_entries(DOMAIN):
         device_id = _entry_device_id(entry)
         host = _entry_host(entry)
         if not device_id or not host:
+            continue
+        # Only a device that is answering its own protocol proves which MAC
+        # belongs to it.  A stale address now held by another device would
+        # otherwise be recorded as this device's MAC, and every later lookup
+        # would follow the wrong device.
+        bucket = domain_data.get(device_id)
+        device = bucket.get("device") if isinstance(bucket, dict) else None
+        if device is None or not device.has_returned_state:
             continue
         mac = arp.get(host)
         if mac and macs.get(device_id) != mac:
@@ -392,7 +496,7 @@ async def async_unreachable_entries(
     for entry in hass.config_entries.async_entries(DOMAIN):
         device_id = _entry_device_id(entry)
         host = _entry_host(entry)
-        if not device_id or not host:
+        if entry.disabled_by or not device_id or not host:
             continue
         bucket = domain_data.get(device_id)
         device = bucket.get("device") if isinstance(bucket, dict) else None
@@ -400,11 +504,18 @@ async def async_unreachable_entries(
             if not device.has_returned_state:
                 unreachable.append(entry)
             continue
-        if not await hass.async_add_executor_job(probe, host):
+        # No device object: the entry is between setups, or its setup failed.
+        # A TCP answer on the stored address proves nothing here - after a DHCP
+        # change that address is often held by a *different* device - so only a
+        # recorded MAC that matches the ARP entry counts as "it is still there".
+        # Without a record the entry is handed to the verified relocation below,
+        # which does nothing at all when the device is where it should be.
+        mac = macs.get(device_id)
+        if mac is None:
             unreachable.append(entry)
             continue
-        mac = macs.get(device_id)
-        if mac and arp.get(host) != mac:
+        answers = await hass.async_add_executor_job(probe, host)
+        if not answers or arp.get(host) != mac:
             unreachable.append(entry)
     return unreachable
 
@@ -452,6 +563,7 @@ def choose_candidate(
     device_id: str,
     by_mac: dict[str, str],
     broadcast: dict[str, str],
+    identified: dict[str, str] | None = None,
     arp: dict[str, str] | None = None,
     live_hosts: Any = (),
 ) -> tuple[str | None, str | None, str | None]:
@@ -469,6 +581,18 @@ def choose_candidate(
     arp = arp or {}
     mac_ip = by_mac.get(mac) if mac else None
     broadcast_ip = broadcast.get(device_id)
+    identified_ip = (identified or {}).get(device_id)
+
+    if identified_ip:
+        # Strongest evidence: the device answered a full Tuya handshake for its
+        # own id and local key.  Nothing else is needed.
+        if identified_ip in live_hosts:
+            return (
+                None,
+                "protocol",
+                f"candidate address {identified_ip} is in use by another device",
+            )
+        return identified_ip, "protocol", None
 
     if mac_ip:
         if broadcast_ip and broadcast_ip != mac_ip:
@@ -497,10 +621,18 @@ def choose_candidate(
     return ip, confirmed_by, None
 
 
-async def async_relocate_devices(hass: HomeAssistant) -> dict[str, Any]:
-    """Put unreachable devices back on their current address, verified by MAC.
+async def async_relocate_devices(
+    hass: HomeAssistant, *, force_protocol: bool = False
+) -> dict[str, Any]:
+    """Put unreachable devices back on their current address.
 
-    Returns a summary suitable for a service response or a log line.
+    A device is placed on three pieces of evidence, strongest first: a full Tuya
+    handshake for its own id and key, the MAC recorded at the candidate address,
+    or the address the device id answers the discovery broadcast from.  Returns a
+    summary suitable for a service response or a log line.
+
+    ``force_protocol`` skips the throttle on the handshake probe, for the manual
+    service (the periodic sweep keeps it, as the probe is the slow one).
     """
     relocated: list[str] = []
     unverified: list[str] = []
@@ -509,7 +641,7 @@ async def async_relocate_devices(hass: HomeAssistant) -> dict[str, Any]:
     entries = [
         entry
         for entry in hass.config_entries.async_entries(DOMAIN)
-        if _entry_device_id(entry) and _entry_host(entry)
+        if not entry.disabled_by and _entry_device_id(entry) and _entry_host(entry)
     ]
     if not entries:
         return {
@@ -541,6 +673,21 @@ async def async_relocate_devices(hass: HomeAssistant) -> dict[str, Any]:
         hass, [_entry_device_id(entry) for entry in unreachable]
     )
 
+    # Devices the two cheap checks could not place are identified by talking the
+    # Tuya protocol to each device on the LAN: that needs no MAC record (a fresh
+    # install has none) and no answer to the discovery broadcast.
+    identified: dict[str, str] = {}
+    unresolved = [
+        entry
+        for entry in unreachable
+        if macs.get(_entry_device_id(entry)) not in by_mac
+        and _entry_device_id(entry) not in broadcast
+    ]
+    if unresolved:
+        identified = await async_identify_devices(
+            hass, unreachable, force=force_protocol
+        )
+
     macs_dirty = False
     for entry in unreachable:
         device_id = _entry_device_id(entry)
@@ -552,6 +699,7 @@ async def async_relocate_devices(hass: HomeAssistant) -> dict[str, Any]:
             device_id=device_id,
             by_mac=by_mac,
             broadcast=broadcast,
+            identified=identified,
             arp=arp,
             live_hosts=live_hosts,
         )

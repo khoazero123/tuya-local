@@ -62,9 +62,14 @@ def _set_device(hass, returned_state, device_id=DEVID):
     return device
 
 
-def _patch_scan(mocker, *, by_mac, broadcast, arp, macs, probe=True):
+def _patch_scan(mocker, *, by_mac, broadcast, arp, macs, probe=True, identify=None):
     """Patch the LAN/MAC lookups and report what was called."""
+    # The Tuya handshake probe opens sockets, which the Home Assistant
+    # test harness blocks; it never runs for real in a unit test.
     calls = {}
+    calls["identify"] = mocker.patch.object(
+        macmap, "async_identify_devices", AsyncMock(return_value=identify or {})
+    )
     calls["scan"] = mocker.patch.object(
         macmap, "async_scan_by_mac", AsyncMock(return_value=by_mac)
     )
@@ -257,8 +262,46 @@ async def test_relocate_does_nothing_without_entries(hass, mocker):
 
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_relocate_works_without_any_recorded_mac(hass, mocker):
+    """A fresh install has no MAC yet; the handshake places the device.
+
+    The stored address may be answering for a *different* device after a
+    DHCP reshuffle, so a bare TCP answer is not evidence - only a Tuya
+    handshake for this device id and key is.
+    """
+    entry = _make_entry(hass)
+    hass.data.setdefault(DOMAIN, {})  # setup failed, so no device object
+    calls = _patch_scan(
+        mocker, by_mac={}, broadcast={}, arp={}, macs={}, identify={DEVID: NEW_HOST}
+    )
+    calls["probe"].return_value = True
+
+    result = await macmap.async_relocate_devices(hass)
+    await hass.async_block_till_done()
+
+    assert entry.data[CONF_HOST] == NEW_HOST
+    assert result["relocated"] == [f"thermostat: {OLD_HOST} -> {NEW_HOST}"]
+
+
+@pytest.mark.asyncio
+async def test_learn_macs_only_trusts_a_device_that_answers(hass, mocker):
+    """The MAC at a stale address belongs to whoever holds it now, not to us."""
+    _make_entry(hass)
+    hass.data.setdefault(DOMAIN, {})  # no device object
+    mocker.patch.object(
+        macmap, "async_arp_table", AsyncMock(return_value={OLD_HOST: OTHER_MAC})
+    )
+    saved = mocker.patch.object(macmap, "async_save_macs", AsyncMock())
+
+    assert await macmap.async_learn_macs(hass) == 0
+    saved.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_learn_macs_remembers_the_mac_of_a_reachable_device(hass, mocker):
     """A healthy device's MAC is recorded so a later change can be corrected."""
+    _set_device(hass, returned_state=True)
     entry = _make_entry(hass)
     mocker.patch.object(
         macmap, "async_arp_table", AsyncMock(return_value={OLD_HOST: MAC})

@@ -334,6 +334,32 @@ def test_choose_candidate_rejects_broadcast_when_mac_unknown_at_address() -> Non
     assert by == "broadcast"
 
 
+def test_choose_candidate_prefers_the_handshake_identity() -> None:
+    """A device that answered its own id and key needs no other evidence."""
+    ip, by, problem = macmap.choose_candidate(
+        mac=None,
+        device_id="dev1",
+        by_mac={},
+        broadcast={},
+        identified={"dev1": "192.168.1.99"},
+    )
+    assert (ip, by, problem) == ("192.168.1.99", "protocol", None)
+
+
+def test_choose_candidate_refuses_handshake_identity_on_a_used_address() -> None:
+    ip, by, problem = macmap.choose_candidate(
+        mac=None,
+        device_id="dev1",
+        by_mac={},
+        broadcast={},
+        identified={"dev1": "192.168.1.99"},
+        live_hosts={"192.168.1.99"},
+    )
+    assert ip is None
+    assert by == "protocol"
+    assert problem is not None and "in use" in problem
+
+
 def test_choose_candidate_reports_no_candidate_when_nothing_matches() -> None:
     assert macmap.choose_candidate(
         mac=MAC_A,
