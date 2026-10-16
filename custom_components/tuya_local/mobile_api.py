@@ -18,7 +18,8 @@ from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.storage import Store
 
-from .cloud import async_save_auth
+from . import accounts
+from .cloud import AUTH_CACHE
 from .config_flow import async_test_connection, scan_for_device
 from .const import (
     CONF_DEVICE_ID,
@@ -57,6 +58,10 @@ ADD_DEVICE_SCHEMA = vol.Schema(
 SYNC_SESSION_SCHEMA = vol.Schema(
     {
         vol.Required("payload"): dict,
+        # Optional when the payload is a sharing login: which account to store
+        # it as, and what to call it.
+        vol.Optional("label"): cv.string,
+        vol.Optional("account_id"): cv.string,
     }
 )
 
@@ -273,10 +278,22 @@ async def async_handle_sync_cloud_session(call: ServiceCall) -> dict[str, Any]:
     domain_data = hass.data.setdefault(DOMAIN, {})
     domain_data[APP_SESSION_CACHE] = payload
 
-    # If the payload looks like the existing sharing auth cache, reuse it.
-    if "token_info" in payload and "endpoint" in payload:
-        async_save_auth(hass, payload)
-        _LOGGER.info("sync_cloud_session: stored sharing-compatible auth cache")
+    # A sharing login is stored as (or refreshed into) a cloud account, so the
+    # app can push one login per Tuya account and Home Assistant keeps them all.
+    if accounts.is_auth(payload):
+        domain_data[AUTH_CACHE] = payload
+        account = await accounts.async_store_login(
+            hass,
+            payload,
+            label=call.data.get("label"),
+            account_id=call.data.get("account_id"),
+            source="app",
+        )
+        _LOGGER.info(
+            "sync_cloud_session: stored Tuya cloud account '%s'",
+            (account or {}).get("label"),
+        )
+        return {"success": True, "account": account}
     else:
         try:
             await _app_session_store(hass).async_save(payload)

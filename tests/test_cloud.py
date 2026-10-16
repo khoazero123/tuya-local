@@ -174,7 +174,14 @@ class TestLogin:
         assert mock_hass.data[DOMAIN]["auth_cache"] is not None
 
     @pytest.mark.asyncio
-    async def test_failure_clears_auth(self, cloud, mock_hass):
+    async def test_failure_leaves_stored_accounts_alone(self, cloud, mock_hass):
+        """A failed attempt must not sign a stored account out.
+
+        With several accounts stored (accounts.py), a failed login - a QR that
+        was not confirmed, a rejected token - must not delete a login that is
+        still in use elsewhere; accounts are removed with account_remove.
+        """
+        mock_hass.data.setdefault(DOMAIN, {})["auth_cache"] = {"user_code": "kept"}
         mock_lc = MagicMock()
         mock_lc.qr_code.return_value = {
             TUYA_RESPONSE_SUCCESS: True,
@@ -193,7 +200,7 @@ class TestLogin:
         result = await cloud.async_login()
         assert result is False
         assert cloud.is_authenticated is False
-        assert mock_hass.data[DOMAIN]["auth_cache"] is None
+        assert mock_hass.data[DOMAIN]["auth_cache"] == {"user_code": "kept"}
 
 
 class TestLogout:

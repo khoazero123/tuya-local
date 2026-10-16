@@ -306,7 +306,22 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
         if self.__discovered_device:
             # If local discovery already found a device, we can skip the choose
             # device step after updating discovery_info.
-            device_choice = self.__cloud_devices.get(self.__discovered_device["id"])
+            device_id = self.__discovered_device["id"]
+            device_choice = self.__cloud_devices.get(device_id)
+            if device_choice is None:
+                # A device can belong to a different connected account, and its
+                # local key only exists in the account that owns it.
+                from . import accounts
+
+                device_choice, account_id = await accounts.async_find_device(
+                    self.hass, device_id
+                )
+                if device_choice is not None:
+                    _LOGGER.info(
+                        "Local key for %s came from the Tuya cloud account '%s'",
+                        device_id,
+                        account_id,
+                    )
             if device_choice:
                 self.__discovered_device[CONF_LOCAL_KEY] = device_choice.get(
                     CONF_LOCAL_KEY
@@ -315,8 +330,37 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 self.__discovered_device["product_name"] = device_choice.get(
                     "product_name"
                 )
+            else:
+                # Make an empty local key field explicable: with no account that
+                # owns the device, there is nothing to fill it in from.
+                _LOGGER.warning(
+                    "%s is not in any connected Tuya cloud account, so its local "
+                    "key cannot be filled in automatically; connect the account "
+                    "that owns the device (account_login_start) or type the key in",
+                    device_id,
+                )
             return await self.async_step_local()
+
+        self.__cloud_devices = await self._async_all_cloud_devices()
         return await self.async_step_choose_device()
+
+    async def _async_all_cloud_devices(self) -> dict[str, Any]:
+        """Device lists of every connected account, active account first.
+
+        The choose-device list is not limited to one account: a device whose
+        local key lives in a second account can be added just as well.
+        """
+        from . import accounts
+
+        merged = dict(self.__cloud_devices or {})
+        data = await accounts.async_list(self.hass)
+        for account in data["accounts"]:
+            if account["id"] == data["active"]:
+                continue
+            devices = await accounts.async_account_devices(self.hass, account["id"])
+            for index, device in devices.items():
+                merged.setdefault(index, device)
+        return merged
 
     async def async_step_choose_device(self, user_input=None):
         errors = {}

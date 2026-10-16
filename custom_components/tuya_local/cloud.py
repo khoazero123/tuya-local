@@ -65,7 +65,9 @@ def _get_auth_store(hass: HomeAssistant) -> Store:
 
 
 async def async_restore_auth(hass: HomeAssistant) -> None:
-    """Load a saved cloud login from disk into hass.data (once per session)."""
+    """Load the saved cloud accounts from disk into hass.data (once per session)."""
+    from . import accounts
+
     domain_data = hass.data.setdefault(DOMAIN, {})
     if domain_data.get(AUTH_RESTORED):
         return
@@ -73,36 +75,49 @@ async def async_restore_auth(hass: HomeAssistant) -> None:
     if domain_data.get(AUTH_CACHE):
         return
     try:
-        cached = await _get_auth_store(hass).async_load()
+        # Loads the account store, importing a pre-multi-account login as the
+        # first account the first time this runs.
+        await accounts.async_load(hass)
+        account = await accounts.async_resolve(hass)
     except Exception as err:  # noqa: BLE001 - never block setup on cache issues
-        _LOGGER.warning("Could not restore saved Tuya cloud login: %s", err)
+        _LOGGER.warning("Could not restore saved Tuya cloud accounts: %s", err)
         return
-    if cached:
-        domain_data[AUTH_CACHE] = cached
+    auth = (account or {}).get("auth")
+    if accounts.is_auth(auth):
+        domain_data[AUTH_CACHE] = auth
         _LOGGER.info(
-            "Restored saved Tuya cloud login (user code %s)",
-            cached.get("user_code"),
+            "Restored Tuya cloud login for account '%s' (user code %s)",
+            account.get("label"),
+            auth.get("user_code"),
         )
 
 
 def async_save_auth(hass: HomeAssistant, auth: dict[str, Any] | None) -> None:
-    """Cache the cloud login in memory and persist (or clear) it on disk.
+    """Cache a cloud login in memory and store it against its account.
+
+    A login is matched to an account by user code, so re-authenticating an
+    account refreshes it and logging in with a different account adds another
+    one.  Passing ``None`` only clears the in-memory copy: a failed attempt
+    never signs a stored account out, that is done with ``account_remove``.
 
     Must be called from the event loop thread.
     """
+    from . import accounts
+
     domain_data = hass.data.setdefault(DOMAIN, {})
     domain_data[AUTH_CACHE] = auth
-    store = _get_auth_store(hass)
     if auth:
-        hass.async_create_task(store.async_save(auth))
-    else:
-        hass.async_create_task(store.async_remove())
+        accounts.async_store_login_nowait(hass, auth)
 
 
 class Cloud:
-    """Optional Tuya cloud interface for getting device information."""
+    """Optional Tuya cloud interface for getting device information.
 
-    def __init__(self, hass: HomeAssistant):
+    Bound either to an explicit login (``auth``, the way the account store keeps
+    them) or, by default, to the active account's cached login.
+    """
+
+    def __init__(self, hass: HomeAssistant, auth: dict[str, Any] | None = None):
         self.__login_control = LoginControl()
         self.__authentication = {}
         self.__user_code = None
@@ -110,9 +125,15 @@ class Cloud:
         self.__hass = hass
         self.__error_code = None
         self.__error_msg = None
-        # Restore cached authentication
-        if cached := self.__hass.data.get(DOMAIN, {}).get(AUTH_CACHE):
+        if auth is not None:
+            self.__authentication = auth
+        elif cached := self.__hass.data.get(DOMAIN, {}).get(AUTH_CACHE):
             self.__authentication = cached
+
+    @property
+    def authentication(self) -> dict[str, Any]:
+        """The login this instance is using (sensitive: it holds the tokens)."""
+        return self.__authentication
 
     async def async_get_qr_code(self, user_code: str | None = None) -> bool:
         """Get QR code from Tuya server for user code authentication."""
@@ -170,8 +191,8 @@ class Cloud:
             _LOGGER.warning("Login failed: %s", info)
             self.__error_code = info.get(TUYA_RESPONSE_CODE, {})
             self.__error_msg = info.get(TUYA_RESPONSE_MSG, "Unknown error")
-            # Ensure expired authentication is cleared on next attempt
-            async_save_auth(self.__hass, None)
+            # Clear only this attempt: a failed login must not sign a stored
+            # account out (use the account_remove service for that).
             self.__authentication = {}
         return success
 

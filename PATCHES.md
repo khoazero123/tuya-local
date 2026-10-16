@@ -318,3 +318,64 @@ sweep in #5713 because an unreachable device could be moved to a wrong address.
 - Multi-exception `except` clauses carry `# fmt: skip`: the pinned ruff (0.16.x)
   strips the parentheses, which the Python 3.14 runtime used by Home Assistant
   and CI *accepts* (PEP 758) but which is a SyntaxError on older interpreters.
+
+## 11. Several Tuya cloud accounts, with CRUD (2026.10.0.9)
+
+**Problem:** a Tuya app account only sees the devices paired to *that* account,
+and a device's local key can only be read from the account that owns it. After
+"Simple switch" devices at 192.168.1.52 / 192.168.1.78 were discovered but their
+local key was never filled in, the cause turned out to be exactly that: a fresh
+cloud pull returned the 25 devices of the saved account and neither id was among
+them, so `_async_continue_after_login` found no `device_choice` and left the key
+empty (the discovered card also fell back to the generic device type name,
+because that comes from the same list).
+
+**Patch:**
+
+- `custom_components/tuya_local/accounts.py` (new)
+  - private store `/config/.storage/tuya_local.cloud_accounts`:
+    `{"accounts": [{id, label, source, created, last_used, auth}], "active": id}`;
+  - a login is matched to an account by **user code**, so re-authenticating
+    refreshes an account and logging in with another account adds one;
+  - the pre-multi-account login in `tuya_local.cloud_auth` is imported once as
+    account `default` (the old store is left untouched, so a rollback still
+    finds a login);
+  - `sanitize()` is the only shape service responses use: no tokens ever leave
+    the store;
+  - device lists are cached per account (`DEVICE_CACHE_TTL`, 10 min) so looking
+    a device up in several accounts does not mean several cloud round trips.
+- `custom_components/tuya_local/cloud.py`
+  - `Cloud(hass, auth=None)` binds to one account's login; without an argument it
+    keeps using the active account's cached login (all existing callers);
+  - `async_save_auth()` now stores the login against its account instead of
+    overwriting one global blob; `None` clears only the in-memory copy, so a
+    failed attempt can no longer sign a working account out;
+  - `async_restore_auth()` restores the **active** account (migrating the legacy
+    login on first run).
+- `custom_components/tuya_local/config_flow.py`
+  - `_async_continue_after_login()` falls back to searching **every** account for
+    a discovered device's local key (logging which account supplied it), and
+    warns when no account owns the device instead of silently leaving the field
+    empty;
+  - the "choose device" list now merges the device lists of all accounts.
+- `custom_components/tuya_local/refresh.py`
+  - device names are merged over every account, so a discovered card is labelled
+    with the name from whichever account owns it.
+- `custom_components/tuya_local/mobile_api.py`
+  - `sync_cloud_session` accepts `label` / `account_id` and stores a sharing
+    login as (or into) an account, so the Smarthome app can push one login per
+    Tuya account.
+- **Services** (registered once per entry):
+  `account_list`, `account_login_start` (returns `qr` + `qr_payload` to render as
+  a QR code), `account_login_finish`, `account_rename`, `account_set_active`,
+  `account_remove`; documented in `services.yaml`.
+- `tests/test_accounts_ha.py` (new, 14 tests) and `tests/test_cloud.py` (the
+  failed-login test now asserts the new contract).
+
+**Notes:**
+
+- Two ways to connect an account, as requested: Home Assistant does the QR login
+  (`account_login_start` → scan with the Tuya/SmartLife app → `account_login_finish`)
+  **or** the mobile app pushes an existing session (`sync_cloud_session`).
+- Device control is untouched: still 100% local; the cloud is only used to read
+  names and local keys.

@@ -66,20 +66,26 @@ async def async_get_names(hass: HomeAssistant) -> dict[str, str]:
 
 
 async def async_refresh_names(hass: HomeAssistant) -> dict[str, str] | None:
-    """Fetch device names from the Tuya cloud, when a login is available."""
-    from .cloud import Cloud
+    """Fetch device names from every connected Tuya account, when any is."""
+    from . import accounts
 
     domain_data = hass.data.setdefault(DOMAIN, {})
-    if not domain_data.get("auth_cache"):
+    connected = await accounts.async_list(hass)
+    if not connected["count"]:
         _LOGGER.info(
             "No saved Tuya cloud login; skipping device name refresh "
             "(use the cloud-assisted setup once to enable it)"
         )
         return None
     try:
-        names = await Cloud(hass).async_get_device_names()
+        # Merged over every account: a discovered device is labelled with the
+        # name from whichever account owns it.
+        names = await accounts.async_all_device_names(hass, force=True)
     except Exception as err:  # noqa: BLE001 - cloud is optional
         _LOGGER.warning("Could not refresh device names from Tuya cloud: %s", err)
+        return None
+    if not names:
+        _LOGGER.warning("No device names could be read from the Tuya cloud")
         return None
     domain_data[NAMES_CACHE] = names
     try:

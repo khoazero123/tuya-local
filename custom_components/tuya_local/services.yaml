@@ -51,12 +51,26 @@ list_configured:
 
 sync_cloud_session:
   name: Sync cloud session from mobile app
-  description: Store App SDK / OpenAPI or sharing auth for later refresh
+  description: >-
+    Store an App SDK / OpenAPI session, or a Tuya sharing login as a cloud
+    account. A sharing login (payload with token_info/user_code/endpoint) is
+    stored as (or refreshed into) the account named by label/account_id, so the
+    app can push one login per Tuya account.
   fields:
     payload:
       required: true
       selector:
         object:
+    label:
+      name: Account label
+      description: Name to store the account under (sharing logins only)
+      selector:
+        text:
+    account_id:
+      name: Account id
+      description: Update this account instead of matching by user code
+      selector:
+        text:
 
 send_learned_ir_command:
   target:
@@ -80,3 +94,82 @@ send_learned_ir_command:
         entity:
           filter:
             domain: infrared
+
+account_list:
+  name: List Tuya cloud accounts
+  description: >-
+    Return every connected Tuya cloud account (id, label, user code, which one
+    is active). Tokens are never returned.
+  fields: {}
+
+account_login_start:
+  name: Start Tuya account login
+  description: >-
+    Begin a QR login for one Tuya app account. Returns the qr token and the
+    qr_payload string to render as a QR code and scan with the Tuya/SmartLife
+    app; then call account_login_finish.
+  fields:
+    user_code:
+      name: User code
+      description: The account's user code, shown in the Tuya app account page
+      required: true
+      selector:
+        text:
+    label:
+      name: Account label
+      selector:
+        text:
+    account_id:
+      name: Account id
+      description: Re-authenticate this existing account instead of a new one
+      selector:
+        text:
+
+account_login_finish:
+  name: Finish Tuya account login
+  description: >-
+    Complete a login started with account_login_start, once the QR code has been
+    scanned. Returns the stored account, or retry=true when the app has not
+    confirmed yet (call it again).
+  fields:
+    account_id:
+      name: Account id
+      description: The account_id returned by account_login_start
+      required: true
+      selector:
+        text:
+    label:
+      name: Account label
+      selector:
+        text:
+
+account_rename:
+  name: Rename Tuya cloud account
+  fields:
+    account_id:
+      required: true
+      selector:
+        text:
+    label:
+      name: New label
+      required: true
+      selector:
+        text:
+
+account_set_active:
+  name: Set active Tuya cloud account
+  description: The active account is used by default to add devices and read names
+  fields:
+    account_id:
+      required: true
+      selector:
+        text:
+
+account_remove:
+  name: Remove Tuya cloud account
+  description: Delete a stored Tuya cloud account (does not touch its devices)
+  fields:
+    account_id:
+      required: true
+      selector:
+        text:
