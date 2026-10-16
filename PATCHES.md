@@ -214,6 +214,9 @@ Các patch của fork làm lệch một số test/kiểm tra so với upstream; 
 
 Sync log:
 
+- **2026-10-16** — release `2026.10.0.8`: MAC verified IP relocation
+  (patch #10). No upstream sync in this release; the base is still upstream
+  `2026.10.0`.
 - **2026-10-14** — merged `upstream/main` (11 commits, `c0fb71b4..95300d05`:
   EZAIoT Lite socket thermostat, T34-Mini in `relay_switch_remote`, Dreamlight
   strips, Meaco 16K, Arlec PC193HA, Klarta Stor3 `mild`, Fisher Summer work time,
@@ -249,3 +252,56 @@ nên khi thiết bị S11 được flash về firmware OEM (dùng Tuya Local là
 
 **Chưa khép kín:** học RF *qua bridge* vẫn cần dấu hiệu chế độ RF (option mới
 `ir2mqtt_rf` hoặc lệnh MQTT `learn_rf`); send RF đã xong.
+
+## 10. MAC verified IP relocation (2026.10.0.8)
+
+**Problem:** a device's LAN address is stored as a plain IP in the config entry.
+When DHCP moves a device (typically after a router reboot) the entry keeps
+dialling the old address and sits in `setup_retry` until the address is fixed by
+hand. Patch 3 could already relocate a device *by device id*, but only when the
+user pressed the button or called the service: upstream disabled the periodic
+sweep in #5713 because an unreachable device could be moved to a wrong address.
+
+**Patch:**
+
+- `custom_components/tuya_local/macmap.py` (new)
+  - remembers each device's **MAC address** in a private `Store`
+    (`/config/.storage/tuya_local.device_macs`), learned from the host's ARP
+    table while the device is healthy;
+  - finds a device again **by MAC**: a bounded, concurrent TCP probe of the LAN
+    on the Tuya port (6668) plus one ARP table read yields the whole
+    `{mac: ip}` map, so a device is located even when it ignores the Tuya
+    discovery broadcast -- the case the device-id relocation cannot handle;
+  - rewrites the stored host only after **both identities agree** (the MAC in
+    the ARP table at the candidate address *and* the device id from the
+    broadcast scan), refuses an address another configured device is answering
+    on, and requires the candidate to accept a connection;
+  - takes the subnets from Home Assistant's own network adapters (plus the
+    subnet of each configured device), so nothing is hardcoded and the same
+    code runs on any install;
+  - on an install where the ARP table is not visible (the container is not on
+    the host network) the MAC half disables itself silently and relocation
+    still happens from the broadcast alone.
+- `custom_components/tuya_local/discovery.py`
+  - the periodic sweep is re-enabled (60 s). It only runs when at least one
+    configured device has stopped reporting state, and delegates to `macmap`,
+    which closes the #5713 hazard.
+- `custom_components/tuya_local/refresh.py`
+  - relocation delegates to `macmap`; the service response is now
+    `relocated` / `unverified` / `not_found`;
+  - new `tuya_local.relocate_devices` service (relocation only: no cloud call,
+    no discovery rescan) for automations.
+- `custom_components/tuya_local/services.yaml` -- documents the new service.
+- `tests/test_macmap.py` (new, plain Python, 19 tests) -- MAC normalisation,
+  subnet selection, host enumeration, ARP parsing, probing and the
+  verification rules.
+- `tests/test_macmap_ha.py` (new) -- integration side: learning, relocation,
+  refusals, options-host handling, probe fallback.
+- `tests/test_discovery.py` -- the sweep tests now cover the delegation.
+
+**Notes:**
+
+- No cloud round trip and no router access: everything comes from the LAN.
+- Multi-exception `except` clauses carry `# fmt: skip`: the pinned ruff (0.16.x)
+  strips the parentheses, which the Python 3.14 runtime used by Home Assistant
+  and CI *accepts* (PEP 758) but which is a SyntaxError on older interpreters.

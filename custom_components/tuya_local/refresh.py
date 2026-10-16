@@ -1,10 +1,12 @@
-"""On-demand refresh helpers for the Tuya Local integration.
+"""On-demand helpers for the Tuya Local integration.
 
-Backs the ``tuya_local.refresh_devices`` service and the matching
-"Refresh device list" button.  Three jobs:
+Backs the ``tuya_local.refresh_devices`` and ``tuya_local.relocate_devices``
+services and the matching "Refresh device list" button.  Three jobs:
 
-1. re-locate configured devices on the LAN by device id and update the stored
-   host when a DHCP change moved them (the entry reloads itself),
+1. re-locate configured devices on the LAN and update the stored host when a DHCP
+   change moved them (the entry reloads itself).  The relocation itself lives in
+   ``macmap``: it is confirmed by MAC address, so a device that is only
+   temporarily unreachable is never moved onto a wrong address,
 2. refresh the device names from the Tuya cloud, so discovered devices can be
    labelled with the name set in the Tuya/SmartLife app,
 3. re-run the LAN discovery scan so newly seen devices surface again.
@@ -18,13 +20,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import tinytuya
 import voluptuous as vol
-from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.helpers.storage import Store
 
-from .const import CONF_DEVICE_ID, DATA_DISCOVERY, DOMAIN
+from . import macmap
+from .const import DATA_DISCOVERY, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ NAMES_CACHE = "cloud_names"
 NAMES_STORE = "cloud_names_store"
 
 SERVICE_REFRESH_DEVICES = "refresh_devices"
+SERVICE_RELOCATE_DEVICES = "relocate_devices"
 
 
 def _store(hass: HomeAssistant) -> Store:
@@ -88,58 +90,21 @@ async def async_refresh_names(hass: HomeAssistant) -> dict[str, str] | None:
     return names
 
 
-def _scan_lan() -> dict[str, str]:
-    """Blocking LAN scan; returns {device_id: ip}."""
-    try:
-        found = tinytuya.deviceScan(verbose=False, poll=False, maxretry=2)
-    except OSError as err:
-        _LOGGER.warning("LAN scan failed: %s", err)
-        return {}
-    result: dict[str, str] = {}
-    for info in found.values():
-        gwid = info.get("gwId")
-        ip = info.get("ip")
-        if gwid and ip:
-            result[gwid] = ip
-    return result
-
-
 async def async_relocate_devices(hass: HomeAssistant) -> dict[str, Any]:
-    """Update the stored host of any configured device that changed IP."""
-    found = await hass.async_add_executor_job(_scan_lan)
-    moved: list[str] = []
-    unchanged: list[str] = []
-    not_found: list[str] = []
+    """Update the stored host of any configured device that changed IP.
 
-    for entry in hass.config_entries.async_entries(DOMAIN):
-        device_id = entry.data.get(CONF_DEVICE_ID)
-        if not device_id:
-            continue
-        ip = found.get(device_id)
-        current = {**entry.data, **entry.options}.get(CONF_HOST)
-        if not ip:
-            not_found.append(entry.title)
-            continue
-        if ip == current:
-            unchanged.append(entry.title)
-            continue
-        _LOGGER.warning(
-            "%s: LAN IP changed to %s (was %s); updating configuration",
-            entry.title,
-            ip,
-            current,
-        )
-        new_options = entry.options
-        if CONF_HOST in entry.options:
-            new_options = {**entry.options, CONF_HOST: ip}
-        hass.config_entries.async_update_entry(
-            entry,
-            data={**entry.data, CONF_HOST: ip},
-            options=new_options,
-        )
-        moved.append(f"{entry.title}: {current} -> {ip}")
+    Delegates to ``macmap``, where each candidate address is confirmed by MAC
+    address before the stored host is rewritten.
+    """
+    return await macmap.async_relocate_devices(hass)
 
-    return {"moved": moved, "unchanged": unchanged, "not_found": not_found}
+
+async def async_handle_relocate_devices(call: ServiceCall) -> dict[str, Any]:
+    """Service handler: relocate devices and report what changed."""
+    from .cloud import async_restore_auth
+
+    await async_restore_auth(call.hass)
+    return await async_relocate_devices(call.hass)
 
 
 async def async_handle_refresh_devices(call: ServiceCall) -> dict[str, Any]:
@@ -166,8 +131,8 @@ async def async_handle_refresh_devices(call: ServiceCall) -> dict[str, Any]:
             _LOGGER.warning("LAN discovery rescan failed: %s", err)
 
     result = {
-        "relocated": relocated["moved"],
-        "unchanged": len(relocated["unchanged"]),
+        "relocated": relocated["relocated"],
+        "unverified": relocated["unverified"],
         "not_found": relocated["not_found"],
         "cloud_names": len(names) if names else 0,
         "rescanned": rescanned,
@@ -184,6 +149,13 @@ async def async_setup_refresh_services(hass: HomeAssistant) -> None:
         DOMAIN,
         SERVICE_REFRESH_DEVICES,
         async_handle_refresh_devices,
+        schema=vol.Schema({}),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RELOCATE_DEVICES,
+        async_handle_relocate_devices,
         schema=vol.Schema({}),
         supports_response=SupportsResponse.OPTIONAL,
     )

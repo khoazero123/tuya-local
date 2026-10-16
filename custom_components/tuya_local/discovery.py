@@ -17,10 +17,11 @@ how their IP changed. This is the same mechanism the config flow already uses vi
 This module runs two active-scan tasks:
 
 - a fast sweep (every ``SWEEP_INTERVAL``) that relocates *unreachable* configured
-  devices: it looks up the current IP by device id and updates the config entry's
-  host in place. The existing update-listener reload then reconnects the device on
-  the new IP -- no manual reconfiguration, no cloud round-trip, history preserved.
-  Reachable devices are never scanned, so there is no traffic while healthy.
+  devices: the current address is looked up and confirmed by MAC address (see
+  ``macmap``), the config entry's host is updated and the existing update-listener
+  reload reconnects the device on the new address -- no manual reconfiguration, no
+  cloud round-trip, history preserved.  Reachable devices are never scanned, so
+  there is no traffic while the network is healthy.
 - a slower full scan (every ``SCAN_INTERVAL``) that, from a single
   ``deviceScan``: (a) warns, once per device per HA start, when a *configured*
   device reports a ``productKey`` its config file does not list under
@@ -45,8 +46,8 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_interval
 
 from .const import CONF_DEVICE_CID, CONF_DEVICE_ID, CONF_TYPE, DATA_DISCOVERY, DOMAIN
-from .helpers.config import get_device_id
 from .helpers.device_config import get_config
+from .macmap import async_relocate_devices
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -62,19 +63,6 @@ SCAN_INTERVAL = timedelta(minutes=10)
 # Delay before the extra scan that runs shortly after startup, so devices show
 # up under "Discovered" without waiting a full SCAN_INTERVAL after a restart.
 STARTUP_SCAN_DELAY = 45
-
-
-def _find_device(device_id):
-    """Locate a device by id on the LAN (blocking; run in executor).
-
-    Sends the Tuya discovery request and returns the scanner result dict
-    (``{'ip': ..., 'id': ..., 'product_id': ..., ...}``), or a blank result on
-    any socket error.
-    """
-    try:
-        return tinytuya.find_device(dev_id=device_id)
-    except OSError:
-        return {"ip": None}
 
 
 def _scan_all():
@@ -107,13 +95,15 @@ class TuyaLANRediscovery:
     @callback
     def async_start(self) -> None:
         """Begin periodic discovery tasks."""
-        # TEMPORARILY DISABLED: the sweep is a bit too aggressive and can cause
-        # incorrect IP updates if a device is temporarily unreachable, see #5713.
-        #
-        # if self._unsub_sweep is None:
-        #     self._unsub_sweep = async_track_time_interval(
-        #         self._hass, self._async_sweep, SWEEP_INTERVAL
-        #     )
+        # The sweep is re-enabled (upstream disabled it in #5713 because an
+        # unreachable device could be moved to a wrong address): the relocation
+        # is now confirmed against the device's MAC and device id before the
+        # stored host is rewritten, so a device that is merely unreachable is
+        # left where it is.
+        if self._unsub_sweep is None:
+            self._unsub_sweep = async_track_time_interval(
+                self._hass, self._async_sweep, SWEEP_INTERVAL
+            )
         if self._unsub_scan is None:
             self._unsub_scan = async_track_time_interval(
                 self._hass, self._async_discovery_scan, SCAN_INTERVAL
@@ -140,60 +130,21 @@ class TuyaLANRediscovery:
                 unsub()
                 setattr(self, attr, None)
 
-    def _unreachable_entries(self):
-        """Yield (entry, device_id) for configured devices not returning state."""
-        domain_data = self._hass.data.get(DOMAIN, {})
-        for entry in self._hass.config_entries.async_entries(DOMAIN):
-            device_id = entry.data.get(CONF_DEVICE_ID)
-            if not device_id:
-                continue
-            bucket = domain_data.get(get_device_id(entry.data))
-            device = bucket.get("device") if bucket else None
-            # No device object yet (setup not complete / failed) or it has not
-            # returned state recently -> treat as unreachable and worth a scan.
-            if device is not None and device.has_returned_state:
-                continue
-            yield entry, device_id
-
     async def _async_sweep(self, now=None) -> None:
-        """Scan for any unreachable devices and update changed hosts."""
+        """Relocate any unreachable device onto its current address.
+
+        Only devices that stopped returning state are looked at, so a healthy
+        network costs one ARP table read per sweep and no scan traffic at all.
+        """
         if self._scanning:
             return
-        targets = list(self._unreachable_entries())
-        if not targets:
-            return
-
         self._scanning = True
         try:
-            for entry, device_id in targets:
-                found = await self._hass.async_add_executor_job(_find_device, device_id)
-                ip = found.get("ip") if found else None
-                if not ip:
-                    continue
-                current = {**entry.data, **entry.options}.get(CONF_HOST)
-                if ip == current:
-                    continue
-                # WARNING, not INFO: an IP change is a notable operational event
-                # the user may want to see, and config entries commonly run at
-                # log level WARNING (which would suppress INFO).
-                _LOGGER.warning(
-                    "%s: LAN IP changed to %s (was %s); updating configuration",
-                    entry.title,
-                    ip,
-                    current,
-                )
-                # Write the new host wherever it currently takes effect: always
-                # to data, and also to options when options carries the host
-                # (the options flow stores it there, overriding data), so the
-                # merged config actually changes and the entry reloads.
-                new_options = entry.options
-                if CONF_HOST in entry.options:
-                    new_options = {**entry.options, CONF_HOST: ip}
-                self._hass.config_entries.async_update_entry(
-                    entry,
-                    data={**entry.data, CONF_HOST: ip},
-                    options=new_options,
-                )
+            result = await async_relocate_devices(self._hass)
+            if result.get("relocated"):
+                _LOGGER.info("IP relocation sweep: %s", result["relocated"])
+        except Exception as err:  # noqa: BLE001 - a sweep must never break setup
+            _LOGGER.warning("IP relocation sweep failed: %s", err)
         finally:
             self._scanning = False
 

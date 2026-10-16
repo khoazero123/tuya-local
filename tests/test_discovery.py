@@ -60,136 +60,79 @@ def _set_device(hass, returned_state, device_id=DEVID):
 
 
 @pytest.mark.asyncio
-async def test_sweep_updates_unreachable_changed_host(hass, caplog, mocker):
-    """An unreachable device gets relocated, its host updated, and it's logged at WARNING."""
-    entry = _make_entry(hass, host="192.168.1.10")
+async def test_sweep_delegates_to_mac_verified_relocation(hass, mocker):
+    """The sweep runs the relocation, which confirms each address by MAC."""
+    _make_entry(hass, host="192.168.1.10")
+    _set_device(hass, returned_state=False)
+    relocate = mocker.patch(
+        "custom_components.tuya_local.discovery.async_relocate_devices",
+        AsyncMock(
+            return_value={
+                "relocated": ["thermostat: 192.168.1.10 -> 192.168.1.55"],
+                "unverified": [],
+                "not_found": [],
+            }
+        ),
+    )
+
+    await TuyaLANRediscovery(hass)._async_sweep()
+    await hass.async_block_till_done()
+
+    relocate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_sweep_does_not_run_while_a_scan_is_in_progress(hass, mocker):
+    """The sweep and the discovery scan never overlap."""
+    _make_entry(hass, host="192.168.1.10")
+    _set_device(hass, returned_state=False)
+    relocate = mocker.patch(
+        "custom_components.tuya_local.discovery.async_relocate_devices",
+        AsyncMock(return_value={"relocated": [], "unverified": [], "not_found": []}),
+    )
+    rediscovery = TuyaLANRediscovery(hass)
+    rediscovery._scanning = True
+
+    await rediscovery._async_sweep()
+
+    relocate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sweep_swallows_errors(hass, mocker):
+    """A failing sweep must never raise out of the periodic task."""
+    _make_entry(hass, host="192.168.1.10")
     _set_device(hass, returned_state=False)
     mocker.patch(
-        "custom_components.tuya_local.discovery._find_device",
-        return_value={"ip": "192.168.1.55", "id": DEVID},
-    )
-
-    with caplog.at_level(
-        logging.WARNING, logger="custom_components.tuya_local.discovery"
-    ):
-        await TuyaLANRediscovery(hass)._async_sweep()
-        await hass.async_block_till_done()
-
-    assert entry.data[CONF_HOST] == "192.168.1.55"
-    # The IP change must be visible even when the entry runs at WARNING.
-    assert "192.168.1.55" in caplog.text
-    assert "192.168.1.10" in caplog.text
-
-
-@pytest.mark.asyncio
-async def test_sweep_skips_reachable_device(hass, mocker):
-    """A device that is returning state is never scanned."""
-    entry = _make_entry(hass, host="192.168.1.10")
-    _set_device(hass, returned_state=True)
-    find = mocker.patch(
-        "custom_components.tuya_local.discovery._find_device",
-        return_value={"ip": "192.168.1.55"},
+        "custom_components.tuya_local.discovery.async_relocate_devices",
+        AsyncMock(side_effect=RuntimeError("boom")),
     )
 
     await TuyaLANRediscovery(hass)._async_sweep()
     await hass.async_block_till_done()
-
-    find.assert_not_called()
-    assert entry.data[CONF_HOST] == "192.168.1.10"
-
-
-@pytest.mark.asyncio
-async def test_sweep_no_change_when_ip_same(hass, mocker):
-    """If the scan returns the current IP, no entry update happens."""
-    entry = _make_entry(hass, host="192.168.1.10")
-    _set_device(hass, returned_state=False)
-    mocker.patch(
-        "custom_components.tuya_local.discovery._find_device",
-        return_value={"ip": "192.168.1.10"},
-    )
-    update = mocker.spy(hass.config_entries, "async_update_entry")
-
-    await TuyaLANRediscovery(hass)._async_sweep()
-    await hass.async_block_till_done()
-
-    update.assert_not_called()
-    assert entry.data[CONF_HOST] == "192.168.1.10"
-
-
-@pytest.mark.asyncio
-async def test_sweep_handles_not_found(hass, mocker):
-    """A scan that finds nothing must not raise or change anything."""
-    entry = _make_entry(hass, host="192.168.1.10")
-    _set_device(hass, returned_state=False)
-    mocker.patch(
-        "custom_components.tuya_local.discovery._find_device",
-        return_value={"ip": None},
-    )
-    update = mocker.spy(hass.config_entries, "async_update_entry")
-
-    await TuyaLANRediscovery(hass)._async_sweep()
-    await hass.async_block_till_done()
-
-    update.assert_not_called()
-    assert entry.data[CONF_HOST] == "192.168.1.10"
-
-
-@pytest.mark.asyncio
-async def test_sweep_updates_host_stored_in_options(hass, mocker):
-    """When the effective host lives in options, the update targets options."""
-    entry = _make_entry(hass, host="10.0.0.1", options={CONF_HOST: "192.168.1.103"})
-    _set_device(hass, returned_state=False)
-    mocker.patch(
-        "custom_components.tuya_local.discovery._find_device",
-        return_value={"ip": "192.168.1.55"},
-    )
-
-    await TuyaLANRediscovery(hass)._async_sweep()
-    await hass.async_block_till_done()
-
-    assert entry.options[CONF_HOST] == "192.168.1.55"
-    assert entry.data[CONF_HOST] == "192.168.1.55"
-
-
-@pytest.mark.asyncio
-async def test_sweep_scans_when_no_device_object(hass, mocker):
-    """An entry with no device object yet (failed setup) is still scanned."""
-    entry = _make_entry(hass, host="192.168.1.10")
-    hass.data.setdefault(DOMAIN, {})  # no device bucket registered
-    mocker.patch(
-        "custom_components.tuya_local.discovery._find_device",
-        return_value={"ip": "192.168.1.77"},
-    )
-
-    await TuyaLANRediscovery(hass)._async_sweep()
-    await hass.async_block_till_done()
-
-    assert entry.data[CONF_HOST] == "192.168.1.77"
 
 
 @pytest.mark.asyncio
 async def test_start_is_idempotent_and_stop_cancels(hass, mocker):
     """async_start_discovery schedules the sweep + scan intervals; stop cancels both."""
-    # unsub_sweep = mocker.MagicMock()
+    unsub_sweep = mocker.MagicMock()
     unsub_scan = mocker.MagicMock()
     track = mocker.patch(
         "custom_components.tuya_local.discovery.async_track_time_interval",
-        side_effect=[unsub_scan],
+        side_effect=[unsub_sweep, unsub_scan],
     )
 
     await async_start_discovery(hass)
     rediscovery = hass.data[DOMAIN][DATA_DISCOVERY]
     assert isinstance(rediscovery, TuyaLANRediscovery)
-    # assert track.call_count == 2
-    assert track.call_count == 1
+    assert track.call_count == 2
 
     # Second call must not schedule more intervals (singleton).
     await async_start_discovery(hass)
-    # assert track.call_count == 2
-    assert track.call_count == 1
+    assert track.call_count == 2
 
     async_stop_discovery(hass)
-    # unsub_sweep.assert_called_once()
+    unsub_sweep.assert_called_once()
     unsub_scan.assert_called_once()
     assert DATA_DISCOVERY not in hass.data[DOMAIN]
 

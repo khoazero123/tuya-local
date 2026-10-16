@@ -1,6 +1,16 @@
 refresh_devices:
   fields: {}
 
+relocate_devices:
+  name: Relocate devices
+  description: >-
+    Find configured devices whose LAN address changed and update it. Each new
+    address is confirmed by the device's MAC address and device id first, so a
+    device that is only temporarily unreachable is left alone. Returns the
+    devices that were relocated, those that could not be confirmed, and those
+    that were not found on the network at all.
+  fields: {}
+
 add_device:
   name: Add device from mobile app
   description: Create or update a local device using credentials from the Smarthome / Tuya App SDK
