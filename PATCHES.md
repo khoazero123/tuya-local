@@ -209,6 +209,19 @@ Các patch của fork làm lệch một số test/kiểm tra so với upstream; 
   (để `test_options_flow_modifies_config` vẫn khớp dict kỳ vọng).
 - Đã chạy `ruff format` cho các file fork patch (`cloud.py`, `config_flow.py`,
   `helpers/device_config.py`, `ir2mqtt_bridge.py`, `refresh.py`) để job "Linting" xanh.
+- **Trước khi push: chạy ĐỦ 4 bước của job "Linting"**, `ruff check` mặc định KHÔNG gồm
+  isort (bước riêng):
+
+  ```sh
+  ruff check --output-format=github .        # 1. lint
+  ruff check --select I --diff .             # 2. thứ tự import
+  ruff format --check --diff .               # 3. coding style
+  yamllint custom_components/tuya_local/devices   # 4. YAML
+  ```
+
+  Bản `2026.10.0.8` đầu tiên fail đúng ở bước 2 (`import socket` phải đứng trước
+  `import subprocess` trong `macmap.py`) — bước 1 pass nên rất dễ tưởng là xong;
+  release `2026.10.0.6` cũng từng fail vì đúng lý do này.
 
 ## Re-basing after an upstream update
 
