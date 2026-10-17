@@ -77,7 +77,12 @@ def _is_lan_ip(value: str) -> bool:
 
 async def _cloud_devices(hass: HomeAssistant) -> dict[str, Any]:
     """Return the device list of the connected Tuya cloud account."""
-    from .cloud import Cloud
+    from .cloud import Cloud, async_restore_auth
+
+    # The saved login is only loaded into hass.data by whoever needs it first;
+    # the service can run before any flow has done that (e.g. right after a
+    # restart), which would look like "no cloud login".
+    await async_restore_auth(hass)
 
     cloud = Cloud(hass)
     if not cloud.is_authenticated:
