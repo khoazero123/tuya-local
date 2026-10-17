@@ -5,7 +5,6 @@ Setup for different kinds of Tuya button devices
 import logging
 
 from homeassistant.components.button import ButtonDeviceClass, ButtonEntity
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 
 from .const import DOMAIN
 from .device import TuyaLocalDevice
@@ -44,20 +43,14 @@ class TuyaLocalRefreshButton(ButtonEntity):
     names from the Tuya cloud and re-runs the LAN discovery scan.
     """
 
-    _attr_has_entity_name = True
-    _attr_name = "Refresh device list"
+    # No device_info on purpose: Home Assistant attaches every device to the config
+    # entry whose setup created it, so this integration level button used to appear
+    # as a "Tuya Local" device inside whichever real device's entry loaded first
+    # (see PATCHES.md #18).  As a plain entity it is still registered, still
+    # pressable and still available to automations, just without a device card.
+    _attr_name = "Tuya Local Refresh device list"
     _attr_unique_id = "tuya_local_refresh_devices"
     _attr_icon = "mdi:refresh"
-    _attr_device_info = DeviceInfo(
-        identifiers={(DOMAIN, "hub")},
-        # Not just "Tuya Local": three different things on a normal install end up
-        # with that name (this integration level device, HACS for the repository,
-        # and a left behind HACS device for a repository that was removed), which
-        # makes the device list hard to read.
-        name="Tuya Local (integration)",
-        manufacturer="tuya-local",
-        entry_type=DeviceEntryType.SERVICE,
-    )
 
     async def async_press(self) -> None:
         """Handle the button press."""
@@ -75,20 +68,10 @@ class TuyaLocalCloudLogoutButton(ButtonEntity):
     which is how you switch Tuya accounts.
     """
 
-    _attr_has_entity_name = True
-    _attr_name = "Logout Tuya account"
+    # No device_info, for the same reason as TuyaLocalRefreshButton.
+    _attr_name = "Tuya Local Logout Tuya account"
     _attr_unique_id = "tuya_local_logout_cloud"
     _attr_icon = "mdi:logout"
-    _attr_device_info = DeviceInfo(
-        identifiers={(DOMAIN, "hub")},
-        # Not just "Tuya Local": three different things on a normal install end up
-        # with that name (this integration level device, HACS for the repository,
-        # and a left behind HACS device for a repository that was removed), which
-        # makes the device list hard to read.
-        name="Tuya Local (integration)",
-        manufacturer="tuya-local",
-        entry_type=DeviceEntryType.SERVICE,
-    )
 
     async def async_press(self) -> None:
         """Handle the button press."""

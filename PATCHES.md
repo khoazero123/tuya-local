@@ -542,3 +542,31 @@ stale entry is called.
 
 No entity ids change (`button.tuya_local_refresh_device_list`,
 `button.tuya_local_logout_tuya_account`), only the device name.
+
+## 18. Take the integration level buttons off a device (2026.10.0.18)
+
+**Problem:** Home Assistant attaches every device to the config entry whose setup
+created it. The integration level buttons (patch #2, #16) were created by whichever
+entry loaded the button platform first, so on
+*Settings → Devices & Services → Tuya Local* a device row **"Tuya Local"
+appeared inside that real device's entry** - next to the device itself, which reads
+like a device that belongs to it. Renaming the device (patch #17) does not help:
+the grouping is by config entry, not by name.
+
+**Patch:** `button.py` - `TuyaLocalRefreshButton` and `TuyaLocalCloudLogoutButton`
+no longer declare `device_info`, so they are plain entities of the integration and
+no device row is created.
+
+- `_attr_has_entity_name` removed and the names spelled out
+  (`"Tuya Local Refresh device list"`, `"Tuya Local Logout Tuya account"`), so the
+  entity ids stay **`button.tuya_local_refresh_device_list`** and
+  **`button.tuya_local_logout_tuya_account`** - automations and dashboards that
+  already reference them keep working.
+- The services (`tuya_local.refresh_devices`, `tuya_local.logout_cloud`) are the
+  other way to trigger the same things.
+- `tests/test_logout_ha.py`: asserts both buttons have `device_info is None`.
+
+**Cleanup on an existing install:** the device created by earlier versions
+(`identifiers {(tuya_local, hub)}`) stays in the registry with no entities after
+the upgrade. Delete it once in *Settings → Devices* (it shows "0 entities"), or
+remove it from the device registry.

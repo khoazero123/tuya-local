@@ -106,6 +106,18 @@ async def test_logout_clears_the_cached_device_names(hass):
     assert await refresh._store(hass).async_load() is None
 
 
+async def test_the_integration_buttons_have_no_device(hass):
+    """Both integration level buttons are plain entities, not devices."""
+    from custom_components.tuya_local.button import TuyaLocalRefreshButton
+
+    refresh_button = TuyaLocalRefreshButton()
+    assert refresh_button.device_info is None
+    assert refresh_button.name == "Tuya Local Refresh device list"
+    # The name is spelled out so the entity id stays
+    # button.tuya_local_refresh_device_list (unchanged for existing installs).
+    assert refresh_button.unique_id == "tuya_local_refresh_devices"
+
+
 async def test_the_button_logs_out(hass):
     await refresh.async_setup_refresh_services(hass)
     await _save_login(hass)
@@ -113,9 +125,12 @@ async def test_the_button_logs_out(hass):
     button = TuyaLocalCloudLogoutButton()
     button.hass = hass
 
-    assert button.name == "Logout Tuya account"
+    assert button.name == "Tuya Local Logout Tuya account"
     assert button.unique_id == "tuya_local_logout_cloud"
     assert button.icon == "mdi:logout"
+    # fork: no device card - Home Assistant would attach it to whichever config
+    # entry loaded first, showing it as a device inside that device's entry.
+    assert button.device_info is None
 
     await button.async_press()
     await hass.async_block_till_done()
