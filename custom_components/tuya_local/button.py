@@ -50,7 +50,11 @@ class TuyaLocalRefreshButton(ButtonEntity):
     _attr_icon = "mdi:refresh"
     _attr_device_info = DeviceInfo(
         identifiers={(DOMAIN, "hub")},
-        name="Tuya Local",
+        # Not just "Tuya Local": three different things on a normal install end up
+        # with that name (this integration level device, HACS for the repository,
+        # and a left behind HACS device for a repository that was removed), which
+        # makes the device list hard to read.
+        name="Tuya Local (integration)",
         manufacturer="tuya-local",
         entry_type=DeviceEntryType.SERVICE,
     )
@@ -77,7 +81,11 @@ class TuyaLocalCloudLogoutButton(ButtonEntity):
     _attr_icon = "mdi:logout"
     _attr_device_info = DeviceInfo(
         identifiers={(DOMAIN, "hub")},
-        name="Tuya Local",
+        # Not just "Tuya Local": three different things on a normal install end up
+        # with that name (this integration level device, HACS for the repository,
+        # and a left behind HACS device for a repository that was removed), which
+        # makes the device list hard to read.
+        name="Tuya Local (integration)",
         manufacturer="tuya-local",
         entry_type=DeviceEntryType.SERVICE,
     )

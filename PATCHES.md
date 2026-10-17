@@ -527,3 +527,18 @@ deleting `/config/.storage/tuya_local.cloud_auth` by hand.
   cloud-assisted → log in with the other account.
 - The button appears once per installation (same guard as the refresh button) and
   on the "Tuya Local" service device.
+
+## 17. Name the integration level device so it is not confused with a device (2026.10.0.17)
+
+**Problem:** the integration level device (the one holding *Refresh device list*
+and *Logout Tuya account*) was called **"Tuya Local"**, and so is the HACS device
+for the repository - and so is the leftover HACS device for a repository that was
+later removed (its `update` / `pre-release` switch stay behind as dead entities).
+Three cards with the same name in the device list.
+
+**Patch:** `button.py` - the integration level device is now
+**"Tuya Local (integration)"**, next to "Tuya Local" for HACS and whatever the
+stale entry is called.
+
+No entity ids change (`button.tuya_local_refresh_device_list`,
+`button.tuya_local_logout_tuya_account`), only the device name.
