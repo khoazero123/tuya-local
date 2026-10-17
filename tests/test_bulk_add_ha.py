@@ -91,10 +91,14 @@ async def test_plan_classifies_every_device(hass, mocker):
         "dev_nokey": bulk_add.SKIP_NO_KEY,
         "dev_cloudonly": bulk_add.SKIP_CLOUD_ONLY,
         "dev_nohost": bulk_add.SKIP_NO_HOST,
-        "dev_noconfig": bulk_add.SKIP_NO_CONFIG,
     }
-    assert [i["device_id"] for i in plan["add"]] == ["dev_ok"]
-    assert plan["add"][0]["type"] == "zitech_ztbox"
+    assert [i["device_id"] for i in plan["add"]] == ["dev_noconfig", "dev_ok"]
+    by_id = {i["device_id"]: i for i in plan["add"]}
+    assert by_id["dev_ok"]["type"] == "zitech_ztbox"
+    # An unlisted product id is not a dead end: the type is asked from the
+    # device when the entries are actually created.
+    assert by_id["dev_noconfig"]["needs_probe"] is True
+    assert "type" not in by_id["dev_noconfig"]
 
 
 async def test_plan_takes_the_address_from_the_lan_scan(hass, mocker):
@@ -123,6 +127,72 @@ async def test_plan_can_leave_out_devices_that_are_not_answering(hass, mocker):
 
     assert plan["add"] == []
     assert plan["skip"][0]["reason"] == bulk_add.SKIP_UNREACHABLE
+
+
+async def test_a_public_cloud_address_is_never_used_as_host(hass, mocker):
+    """The cloud reports the WAN address; using it would point outside the LAN."""
+    _patch_lookups(
+        mocker,
+        {"a": _device("dev_wan", ip="171.242.82.77")},
+        lan={},
+        reachable={},
+    )
+
+    plan = await bulk_add.async_plan_devices(hass)
+
+    assert plan["add"] == []
+    assert plan["skip"][0]["reason"] == bulk_add.SKIP_NO_HOST
+
+
+async def test_unknown_type_needs_the_device_to_answer(hass, mocker):
+    _patch_lookups(
+        mocker,
+        {"a": _device("dev_quiet", product_id=PRODUCT_UNLISTED)},
+        reachable={"192.168.1.50": False},
+    )
+
+    plan = await bulk_add.async_plan_devices(hass)
+
+    assert plan["add"] == []
+    assert plan["skip"][0]["reason"] == bulk_add.SKIP_TYPE_UNKNOWN
+
+
+async def test_the_type_is_inferred_from_the_device_when_needed(hass, mocker):
+    mocker.patch("custom_components.tuya_local.async_setup_entry", return_value=True)
+    _patch_lookups(
+        mocker,
+        {"a": _device("dev_guess", name="Ổ cắm", product_id=PRODUCT_UNLISTED)},
+        reachable={"192.168.1.50": True},
+    )
+    mocker.patch.object(
+        bulk_add, "_infer_type", AsyncMock(return_value="smartplugv2_energy")
+    )
+    await bulk_add.async_setup_bulk_services(hass)
+
+    response = await hass.services.async_call(
+        DOMAIN,
+        bulk_add.SERVICE_ADD_ALL,
+        {"dry_run": False},
+        blocking=True,
+        return_response=True,
+    )
+    await hass.async_block_till_done()
+
+    assert response["added"] == 1
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    assert entry.data[CONF_TYPE] == "smartplugv2_energy"
+
+
+async def test_the_plan_never_returns_local_keys(hass, mocker):
+    _patch_lookups(mocker, {"a": _device("dev_ok")})
+    await bulk_add.async_setup_bulk_services(hass)
+
+    response = await hass.services.async_call(
+        DOMAIN, bulk_add.SERVICE_ADD_ALL, {}, blocking=True, return_response=True
+    )
+
+    assert response["devices"]
+    assert all("local_key" not in item for item in response["devices"])
 
 
 async def test_dry_run_creates_nothing(hass, mocker):
@@ -163,7 +233,9 @@ async def test_add_all_creates_the_entries(hass, mocker):
 
     assert response["added"] == 2
     assert response["failed"] == []
-    entries = {e.data[CONF_DEVICE_ID]: e for e in hass.config_entries.async_entries(DOMAIN)}
+    entries = {
+        e.data[CONF_DEVICE_ID]: e for e in hass.config_entries.async_entries(DOMAIN)
+    }
     assert set(entries) == {"dev_one", "dev_two"}
     assert entries["dev_two"].data[CONF_HOST] == "192.168.1.51"
     assert entries["dev_two"].data[CONF_TYPE] == "zitech_ztbox"

@@ -46,6 +46,7 @@ SKIP_CLOUD_ONLY = "cloud_only"
 SKIP_NO_HOST = "no_host"
 SKIP_NO_CONFIG = "no_config"
 SKIP_UNREACHABLE = "unreachable"
+SKIP_TYPE_UNKNOWN = "type_unknown"
 
 ADD_ALL_SCHEMA = vol.Schema(
     {
@@ -53,6 +54,25 @@ ADD_ALL_SCHEMA = vol.Schema(
         vol.Optional("include_unreachable", default=True): bool,
     }
 )
+
+
+def _is_lan_ip(value: str) -> bool:
+    """Whether an address from the cloud may be a LAN address at all.
+
+    The cloud reports the address the device was last seen from, which for a
+    domestic account is the router's **WAN** address, not the device's LAN
+    address.  Using it would point an entry at an arbitrary host on the internet,
+    so only private addresses are considered - the LAN scan is the real source.
+    """
+    import ipaddress
+
+    if not value:
+        return False
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return address.is_private and not address.is_loopback and not address.is_link_local
 
 
 async def _cloud_devices(hass: HomeAssistant) -> dict[str, Any]:
@@ -143,13 +163,14 @@ async def async_plan_devices(
         device_id = device.get("id")
         if not device_id:
             continue
+        cloud_ip = device.get("ip") or ""
         item: dict[str, Any] = {
             "device_id": device_id,
             "name": device.get("name") or f"Tuya {device_id[-6:]}",
             "product_id": device.get("product_id") or "",
             "local_key": device.get(CONF_LOCAL_KEY) or "",
             "protocol_version": device.get("version") or "auto",
-            "host": device.get("ip") or lan.get(device_id, ""),
+            "host": lan.get(device_id) or (cloud_ip if _is_lan_ip(cloud_ip) else ""),
             "action": "add",
             "reason": None,
         }
@@ -172,7 +193,10 @@ async def async_plan_devices(
             continue
         matches = sorted(types.get(item["product_id"], []))
         if not matches:
-            item.update(action="skip", reason=SKIP_NO_CONFIG)
+            # The product id is listed nowhere; the type can still be inferred by
+            # asking the device for its DPs (the path the mobile app uses), which
+            # only works while it answers.
+            item["needs_probe"] = True
             continue
         # Several configs can list one product; take the first and report the
         # rest so a wrong pick is visible in the plan (and fixable per entry).
@@ -188,6 +212,9 @@ async def async_plan_devices(
         item["reachable"] = reachable.get(item["host"], False)
         if not item["reachable"] and not include_unreachable:
             item.update(action="skip", reason=SKIP_UNREACHABLE)
+        elif not item["reachable"] and item.get("needs_probe"):
+            # No config to take the type from, and no device to ask.
+            item.update(action="skip", reason=SKIP_TYPE_UNKNOWN)
 
     plan_add = [i for i in candidates if i["action"] == "add"]
     plan_skip = [i for i in candidates if i["action"] != "add"]
@@ -205,6 +232,41 @@ async def async_plan_devices(
     }
 
 
+async def _infer_type(hass: HomeAssistant, item: dict[str, Any]) -> str | None:
+    """Ask the device which config fits it (DP-based, like the mobile app)."""
+    from .config_flow import async_test_connection
+
+    config = {
+        CONF_DEVICE_ID: item["device_id"],
+        CONF_HOST: item["host"],
+        CONF_LOCAL_KEY: item["local_key"],
+        CONF_PROTOCOL_VERSION: item.get("protocol_version") or "auto",
+        CONF_POLL_ONLY: False,
+        CONF_NAME: item["name"],
+    }
+    device = await async_test_connection(config, hass)
+    if device is None:
+        return None
+    try:
+        if item.get("product_id"):
+            try:
+                device.set_detected_product_id(item["product_id"])
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.debug("No product hint for %s: %s", item["name"], err)
+        device_type = await device.async_inferred_type()
+        protocol = getattr(device, "_protocol_configured", None)
+        if protocol and protocol != "auto":
+            item["protocol_version"] = protocol
+        return device_type
+    finally:
+        try:
+            device._api.set_socketPersistent(False)
+            if device._api.parent:
+                device._api.parent.set_socketPersistent(False)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Could not release the test socket: %s", err)
+
+
 async def async_add_planned(
     hass: HomeAssistant, plan: dict[str, Any]
 ) -> dict[str, Any]:
@@ -212,6 +274,14 @@ async def async_add_planned(
     added: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
     for item in plan.get("add", []):
+        if not item.get("type"):
+            if not item.get("reachable"):
+                failed.append({**item, "error": SKIP_TYPE_UNKNOWN})
+                continue
+            item["type"] = await _infer_type(hass, item)
+            if not item["type"]:
+                failed.append({**item, "error": SKIP_TYPE_UNKNOWN})
+                continue
         data = {
             CONF_DEVICE_ID: item["device_id"],
             CONF_HOST: item["host"],
@@ -255,6 +325,7 @@ def _summary(plan: dict[str, Any]) -> dict[str, Any]:
     return {
         "found": plan["found"],
         "to_add": len(plan["add"]),
+        "needs_probe": sum(1 for i in plan["add"] if not i.get("type")),
         "skipped": len(plan["skip"]),
         "skip_reasons": reasons,
     }

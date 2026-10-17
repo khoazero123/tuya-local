@@ -399,8 +399,19 @@ second box with ~25 devices it is a lot of it.
 
 **Notes:**
 
+- **The address the cloud reports is the WAN address, not the LAN address.** A
+  dry run on the live box showed `171.242.82.77`, `116.97.28.11`, `1.54.158.230`
+  for four devices. Only a private address is ever taken from the cloud; the real
+  source is the LAN scan, and a device that is not on the LAN is skipped with
+  `no_host` rather than pointed at an address on the internet.
 - Product matching uses `matches_product()`, **not** `matches()`: a config with no
   required DP matches any product id, which would silently pick the wrong type.
+- A product id that is listed in **no** config is not a dead end: the plan marks
+  the device `needs_probe` and the type is inferred from the device itself
+  (DP-based, the path the mobile app uses) when the entries are created. On the
+  live account 11 of 26 devices had an unlisted product id, so without this the
+  feature would have added almost nothing. A device that is not answering cannot
+  be asked, so it is skipped with `type_unknown`.
 - A device whose type cannot be derived is **reported, never guessed** — an entry
   with the wrong type loads without the expected entities, which is worse than a
   visible skip.
