@@ -454,3 +454,41 @@ record also corrupted it for every later step in the same flow (its `name` /
 
 **Notes:** sub-devices are only offered through the cloud path (they are not on
 the LAN), so this affects the "SmartLife cloud-assisted" setup only.
+
+## 15. The add-all step no longer takes a minute (2026.10.0.15)
+
+**Problem:** after picking "SmartLife cloud-assisted device setup" the next step
+took 45 s - 1 min. Measured on the live box (a Pi 5), per plan:
+
+| part | before |
+|---|---|
+| cloud device list (`manager.update_device_cache`) | ~20 s, and the flow fetched it **twice** (once to open the step, once inside the plan) |
+| parse `devices/*.yaml` to map product ids to config types | 4.7 s (all ~1700 files, though only a handful matter) |
+| LAN scan (`tinytuya.deviceScan`) + TCP probe | 2.0 s + 0.03 s |
+
+So the flow was ~47 s: two cloud round trips plus the config scan.
+
+**Patch:**
+
+- `custom_components/tuya_local/bulk_add.py`
+  - `async_cached_devices()`: the account's device list is cached for
+    `_CLOUD_CACHE_TTL` (5 min) with a lock so two callers cannot fetch at once;
+    `force=True` bypasses it. The cache is **warmed in the background** once the
+    services are set up (only when a login exists), so the first flow that opens
+    does not pay for it.
+  - `async_plan_devices(..., devices=...)`: the config flow hands over the list
+    it has already fetched, so the plan never fetches again.
+  - `_type_index()`: reads each config as **text** first and only parses the files
+    that mention the product id (`matches_product` still confirms), and keeps the
+    answer in `_TYPE_CACHE` for the session. 4.7 s → ~0.1 s for the same work.
+  - the type index and the LAN scan run **concurrently** (`asyncio.gather`).
+- `custom_components/tuya_local/config_flow.py`
+  - the three places that fetched the cloud list by hand now go through
+    `async_cached_devices(hass, cloud=self.cloud)` - same instance, one fetch.
+- tests: `_clear_bulk_caches` (module caches must not leak between tests) and
+  `_no_lan_sockets` (the plan would otherwise open a UDP socket, which the Home
+  Assistant test harness records and fails the teardown for).
+
+**Notes:** the cache lives for the process; a device added in the app between two
+fetches shows up after the TTL, or immediately with `force=True`
+(`tuya_local.refresh_devices` still forces a fresh read).

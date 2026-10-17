@@ -26,6 +26,7 @@ from homeassistant.helpers.selector import (
 from homeassistant.util import slugify
 
 from . import DOMAIN
+from .bulk_add import async_cached_devices
 from .cloud import Cloud, async_restore_auth
 from .const import (
     API_PROTOCOL_VERSIONS,
@@ -132,7 +133,9 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
         self.init_cloud()
         try:
             if self.cloud.is_authenticated:
-                self.__cloud_devices = await self.cloud.async_get_devices()
+                self.__cloud_devices = await async_cached_devices(
+                    self.hass, cloud=self.cloud
+                )
                 return await self._async_continue_after_login()
         except Exception as e:  # noqa: BLE001 - fall back to the manual form
             _LOGGER.warning("Could not use the saved Tuya cloud login: %s", e)
@@ -188,7 +191,9 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                         self.cloud.logout()
 
                     if self.cloud.is_authenticated:
-                        self.__cloud_devices = await self.cloud.async_get_devices()
+                        self.__cloud_devices = await async_cached_devices(
+                            self.hass, cloud=self.cloud
+                        )
                         return await self._async_continue_after_login()
                 except Exception as e:
                     # Re-authentication is needed.
@@ -293,7 +298,7 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 description_placeholders=placeholders,
             )
 
-        self.__cloud_devices = await self.cloud.async_get_devices()
+        self.__cloud_devices = await async_cached_devices(self.hass, cloud=self.cloud)
         return await self._async_continue_after_login()
 
     async def _async_continue_after_login(self) -> FlowResult:
@@ -331,7 +336,7 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
         from .bulk_add import async_add_planned, async_plan_devices
 
         if user_input is None:
-            plan = await async_plan_devices(self.hass)
+            plan = await async_plan_devices(self.hass, devices=self.__cloud_devices)
             self.__bulk_plan = plan
             reasons = {}
             for item in plan["skip"]:
@@ -355,7 +360,9 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
         if not user_input.get("add_all"):
             return await self.async_step_choose_device()
 
-        plan = self.__bulk_plan or await async_plan_devices(self.hass)
+        plan = self.__bulk_plan or await async_plan_devices(
+            self.hass, devices=self.__cloud_devices
+        )
         result = await async_add_planned(self.hass, plan)
         return self.async_abort(
             reason="devices_added",

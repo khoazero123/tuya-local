@@ -38,6 +38,31 @@ def auto_enable_custom_integrations(enable_custom_integrations):
 
 
 @pytest.fixture(autouse=True)
+def _no_lan_sockets(mocker):
+    """The add-all plan scans the LAN; these tests are about the flow.
+
+    Without this the plan would open a UDP socket (blocked by the test harness,
+    which then fails teardown) and probe addresses.
+    """
+    from custom_components.tuya_local import bulk_add
+
+    mocker.patch.object(bulk_add, "_lan_addresses", return_value={})
+    mocker.patch.object(bulk_add, "_probe_hosts", return_value={})
+
+
+@pytest.fixture(autouse=True)
+def _clear_bulk_caches():
+    """The plan caches the cloud list and the product index per process."""
+    from custom_components.tuya_local import bulk_add
+
+    bulk_add._cloud_cache.clear()
+    bulk_add._TYPE_CACHE.clear()
+    yield
+    bulk_add._cloud_cache.clear()
+    bulk_add._TYPE_CACHE.clear()
+
+
+@pytest.fixture(autouse=True)
 def prevent_task_creation(mocker):
     mocker.patch("custom_components.tuya_local.device.TuyaLocalDevice.register_entity")
     yield

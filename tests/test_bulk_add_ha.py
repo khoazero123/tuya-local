@@ -26,6 +26,18 @@ def auto_enable_custom_integrations(enable_custom_integrations):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _clear_bulk_caches():
+    """The plan caches the cloud list and the product index per process."""
+    from custom_components.tuya_local import bulk_add
+
+    bulk_add._cloud_cache.clear()
+    bulk_add._TYPE_CACHE.clear()
+    yield
+    bulk_add._cloud_cache.clear()
+    bulk_add._TYPE_CACHE.clear()
+
+
 def _device(device_id: str, **kwargs):
     device = {
         "id": device_id,

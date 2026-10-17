@@ -18,13 +18,18 @@ check on the Tuya port so the report can say which devices are answering now.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor
+from os.path import dirname, join
 from typing import Any
 
 import voluptuous as vol
 from homeassistant.const import CONF_HOST, CONF_NAME
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+
+import custom_components.tuya_local.devices as config_dir
 
 from .const import (
     CONF_DEVICE_ID,
@@ -73,6 +78,57 @@ def _is_lan_ip(value: str) -> bool:
     except ValueError:
         return False
     return address.is_private and not address.is_loopback and not address.is_link_local
+
+
+_CLOUD_CACHE_TTL = 300
+_cloud_cache: dict[str, Any] = {}
+_cloud_lock = asyncio.Lock()
+
+
+async def async_cached_devices(
+    hass: HomeAssistant, *, force: bool = False, cloud: Any = None
+) -> dict[str, Any]:
+    """The account's device list, cached for a few minutes.
+
+    One fetch costs ~20 s on this account (the Tuya endpoint is far away) and the
+    add-all step used to do it twice: once to reach the step and once inside the
+    plan.  The cache also lets the flow read the list it has just fetched, and is
+    warmed in the background at start-up.
+
+    ``cloud`` lets the config flow hand over the instance it has already set up,
+    so the login is read from one place.
+    """
+    fresh = (
+        bool(_cloud_cache.get("at"))
+        and (time.monotonic() - _cloud_cache["at"]) < _CLOUD_CACHE_TTL
+    )
+    if fresh and not force:
+        return _cloud_cache["devices"]
+
+    async with _cloud_lock:
+        fresh = (
+            bool(_cloud_cache.get("at"))
+            and (time.monotonic() - _cloud_cache["at"]) < _CLOUD_CACHE_TTL
+        )
+        if fresh and not force:
+            return _cloud_cache["devices"]
+        devices = (
+            await cloud.async_get_devices()
+            if cloud is not None
+            else await _cloud_devices(hass)
+        )
+        if devices:
+            _cloud_cache["at"] = time.monotonic()
+            _cloud_cache["devices"] = devices
+        return devices
+
+
+async def async_warm_cloud(hass: HomeAssistant) -> None:
+    """Fetch the account's device list in the background, once, at start-up."""
+    try:
+        await async_cached_devices(hass, force=True)
+    except Exception as err:  # noqa: BLE001 - warm-up must never break setup
+        _LOGGER.debug("Cloud warm-up failed: %s", err)
 
 
 async def _cloud_devices(hass: HomeAssistant) -> dict[str, Any]:
@@ -129,39 +185,79 @@ def _probe_hosts(hosts: list[str]) -> dict[str, bool]:
         return dict(zip(hosts, pool.map(_safe, hosts), strict=False))
 
 
+_TYPE_CACHE: dict[str, list[str]] = {}
+
+
 def _type_index(product_ids: set[str]) -> dict[str, list[str]]:
-    """``{product_id: [config types listing it]}`` in a single pass."""
+    """``{product_id: [config types listing it]}``, parsing only what matches.
+
+    Parsing all ~1700 device configs takes ~5 s on an ARM box and made the
+    add-all step feel stuck.  A product id is a literal in the file, so a cheap
+    text read finds the handful of configs worth parsing; the result is kept for
+    the session (the configs only change when the integration is updated).
+    """
     from .helpers.device_config import TuyaDeviceConfig, available_configs
 
-    index: dict[str, list[str]] = {pid: [] for pid in product_ids if pid}
-    if not index:
-        return index
-    for fname in available_configs():
-        try:
-            config = TuyaDeviceConfig(fname)
-        except TypeError:
-            _LOGGER.debug("Parse error in %s", fname)
-            continue
-        for product_id in list(index):
+    wanted = {pid for pid in product_ids if pid and pid not in _TYPE_CACHE}
+    if wanted:
+        directory = dirname(config_dir.__file__)
+        candidates: dict[str, list[str]] = {pid: [] for pid in wanted}
+        for fname in available_configs():
             try:
-                if config.matches_product(product_id):
-                    index[product_id].append(config.config_type)
-            except Exception as err:  # noqa: BLE001 - one bad config, not the plan
-                _LOGGER.debug("Could not check %s for %s: %s", fname, product_id, err)
+                with open(join(directory, fname), encoding="utf-8") as handle:  # noqa: PTH123
+                    text = handle.read()
+            except OSError as err:
+                _LOGGER.debug("Could not read %s: %s", fname, err)
                 continue
-    return index
+            for product_id in wanted:
+                if product_id in text:
+                    candidates[product_id].append(fname)
+        for product_id, fnames in candidates.items():
+            types: list[str] = []
+            for fname in fnames:
+                try:
+                    config = TuyaDeviceConfig(fname)
+                    if config.matches_product(product_id):
+                        types.append(config.config_type)
+                except TypeError:
+                    _LOGGER.debug("Parse error in %s", fname)
+                except Exception as err:  # noqa: BLE001 - one bad config, not the plan
+                    _LOGGER.debug("Could not check %s: %s", fname, err)
+            _TYPE_CACHE[product_id] = sorted(types)
+    return {pid: _TYPE_CACHE.get(pid, []) for pid in product_ids if pid}
 
 
 async def async_plan_devices(
-    hass: HomeAssistant, *, include_unreachable: bool = True
+    hass: HomeAssistant,
+    *,
+    include_unreachable: bool = True,
+    devices: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Work out what can be added from the connected account, and what cannot."""
-    devices = await _cloud_devices(hass)
+    """Work out what can be added from the connected account, and what cannot.
+
+    ``devices`` is the account list when the caller already has it (the config
+    flow does): fetching it again costs ~20 s for nothing.  ``include_unreachable``
+    drops devices that are not answering; ``devices=None`` reads the cached list.
+    """
+    devices = devices if devices is not None else await async_cached_devices(hass)
     configured = {
         entry.data.get(CONF_DEVICE_ID)
         for entry in hass.config_entries.async_entries(DOMAIN)
     }
-    lan = await hass.async_add_executor_job(_lan_addresses) if devices else {}
+
+    # The type index and the LAN scan are independent: run them together.
+    async def _nothing() -> dict:
+        return {}
+
+    products = {
+        device.get("product_id")
+        for device in devices.values()
+        if device.get("product_id")
+    }
+    types, lan = await asyncio.gather(
+        hass.async_add_executor_job(_type_index, products) if products else _nothing(),
+        hass.async_add_executor_job(_lan_addresses) if devices else _nothing(),
+    )
 
     candidates: list[dict[str, Any]] = []
     for device in devices.values():
@@ -191,8 +287,6 @@ async def async_plan_devices(
             item.update(action="skip", reason=SKIP_NO_HOST)
         candidates.append(item)
 
-    products = {i["product_id"] for i in candidates if i["action"] == "add"}
-    types = await hass.async_add_executor_job(_type_index, products) if products else {}
     for item in candidates:
         if item["action"] != "add":
             continue
@@ -372,6 +466,14 @@ async def async_setup_bulk_services(hass: HomeAssistant) -> None:
     """Register the bulk services (once)."""
     if hass.services.has_service(DOMAIN, SERVICE_ADD_ALL):
         return
+    # One background fetch makes the first add-all step quick, but only when
+    # there is a login to fetch with.
+    from .cloud import Cloud, async_restore_auth
+
+    await async_restore_auth(hass)
+    if Cloud(hass).is_authenticated:
+        hass.async_create_task(async_warm_cloud(hass))
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_ADD_ALL,
