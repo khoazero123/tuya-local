@@ -1321,6 +1321,64 @@ async def test_flow_choose_device_indirect_device_with_hub_goes_to_search(hass, 
 
 
 @pytest.mark.asyncio
+async def test_flow_choose_device_indirect_keeps_the_sub_device_name(hass, mocker):
+    """A sub-device must be named after itself, not after its hub.
+
+    Building the sub-device used to reuse (and mutate) the hub's record, so the
+    name offered in the "Device details" step was the hub's.
+    """
+    devices = {
+        "subdev1": {
+            "name": "Công tắc phòng khách",
+            "product_name": "Switch",
+            "local_key": "subkey",
+            "online": True,
+            "is_hub": False,
+            "exists": False,
+            "ip": "",
+            "node_id": "node123",
+            "uuid": "uuid123",
+            "product_id": "prod_sub",
+        },
+        "hub1": {
+            "name": "ZemiSmart Zigbee Hub",
+            "product_name": "ZemiSmart Zigbee Hub",
+            "local_key": "hubkey",
+            "online": True,
+            "is_hub": True,
+            "exists": False,
+            "ip": "192.168.1.1",
+        },
+    }
+    mock_cloud = mocker.MagicMock()
+    mock_cloud.is_authenticated = True
+    mock_cloud.async_get_devices = AsyncMock(return_value=devices)
+    mocker.patch(
+        "custom_components.tuya_local.config_flow.Cloud", return_value=mock_cloud
+    )
+
+    flow = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    await hass.config_entries.flow.async_configure(
+        flow["flow_id"], user_input={"setup_mode": "cloud"}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        flow["flow_id"], user_input={"device_id": "subdev1", "hub_id": "hub1"}
+    )
+    assert result["step_id"] == "search"
+
+    instance = hass.config_entries.flow._progress[flow["flow_id"]]
+    discovered = instance._ConfigFlowHandler__discovered_device
+    assert discovered["name"] == "Công tắc phòng khách"
+    assert discovered["product_name"] == "Switch"
+    assert discovered[CONF_DEVICE_CID] == "node123"
+    assert discovered["ip"] == ""
+    # The hub's own record must survive the sub-device flow untouched.
+    assert devices["hub1"]["name"] == "ZemiSmart Zigbee Hub"
+    assert "product_id" not in devices["hub1"]
+    assert "device_cid" not in devices["hub1"]
+
+
+@pytest.mark.asyncio
 async def test_flow_choose_device_indirect_no_hub_shows_error(hass, mocker):
     """Test selecting an indirect device without a hub shows an error."""
     devices = {

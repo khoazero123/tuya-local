@@ -384,18 +384,27 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                 # This is an indirectly addressable device. Need to know which hub it is connected to.
                 if user_input["hub_id"] != "None":
                     hub_choice = self.__cloud_devices[user_input["hub_id"]]
-                    # Populate node_id or uuid and local_key from the child
-                    # device to pass on complete information to the local step.
-                    hub_choice["ip"] = ""
-                    hub_choice[CONF_DEVICE_CID] = (
-                        device_choice["node_id"] or device_choice["uuid"]
-                    )
+                    # The entry is created for the *sub-device*, reached through
+                    # the hub: take the connection details from the hub, but the
+                    # sub-device's own identity (cid, local key, product id) and
+                    # its own name - otherwise the name offered in the next step
+                    # is the hub's, not the name the user gave the switch.
+                    # A copy, so the hub's own record keeps its name and product
+                    # id for a later attempt in the same flow.
+                    sub_device = {
+                        **hub_choice,
+                        "ip": "",
+                        CONF_DEVICE_CID: (
+                            device_choice["node_id"] or device_choice["uuid"]
+                        ),
+                        "product_id": device_choice["product_id"],
+                        "name": device_choice.get("name") or hub_choice.get("name"),
+                        "product_name": device_choice.get("product_name")
+                        or hub_choice.get("product_name"),
+                    }
                     if device_choice.get(CONF_LOCAL_KEY):
-                        hub_choice[CONF_LOCAL_KEY] = device_choice[CONF_LOCAL_KEY]
-                    # Communicate the sub device product id to help match the
-                    # correect device config in the next step.
-                    hub_choice["product_id"] = device_choice["product_id"]
-                    self.__discovered_device = hub_choice
+                        sub_device[CONF_LOCAL_KEY] = device_choice[CONF_LOCAL_KEY]
+                    self.__discovered_device = sub_device
                     return await self.async_step_search()
                 else:
                     # Show error if user did not select a hub.

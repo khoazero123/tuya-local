@@ -421,3 +421,36 @@ second box with ~25 devices it is a lot of it.
   separate piece of work.
 - This is on the default line (one cloud account); the multi-account branch will
   take it over when merged.
+
+## 14. A sub-device is named after itself, not after its hub (2026.10.0.14)
+
+**Problem:** adding a Zigbee switch (a sub-device reached through its hub) offered
+the **hub's** name in the "Device details" step — the name set for the switch in
+the app was ignored:
+
+> Device details — *ZemiSmart Zigbee Hub* — *ZemiSmart Zigbee Hub*
+> Name: **ZemiSmart Zigbee Hub**
+
+**Cause:** `config_flow.py::async_step_choose_device` took the *hub's* record from
+the cloud list and mutated it to carry the sub-device's connection details
+(`ip=""`, `device_cid`, local key, `product_id`), then assigned that same dict to
+`self.__discovered_device`. The naming step
+(`async_step_choose_entities`) defaults the name from
+`__discovered_device["name"]`, so it read the hub's name. Mutating the hub's
+record also corrupted it for every later step in the same flow (its `name` /
+`product_name` were replaced and a foreign `product_id` added).
+
+**Patch:**
+
+- `custom_components/tuya_local/config_flow.py`
+  - build a **copy** for the sub-device: the hub's connection details plus the
+    sub-device's own `device_cid`, local key, `product_id`, `name` and
+    `product_name` (falling back to the hub's name only when the sub-device has
+    none). The hub's own record is left untouched.
+- `tests/test_config_flow.py`
+  - `test_flow_choose_device_indirect_keeps_the_sub_device_name`: picking
+    "Công tắc phòng khách" through "ZemiSmart Zigbee Hub" must carry the switch's
+    name/product name/`cid`, and must not modify the hub's record.
+
+**Notes:** sub-devices are only offered through the cloud path (they are not on
+the LAN), so this affects the "SmartLife cloud-assisted" setup only.
