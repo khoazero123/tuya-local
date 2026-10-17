@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from homeassistant.const import CONF_HOST
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.tuya_local import bulk_add
 from custom_components.tuya_local.const import (
@@ -13,7 +14,6 @@ from custom_components.tuya_local.const import (
     CONF_TYPE,
     DOMAIN,
 )
-from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 # Listed under `products` in devices/zitech_ztbox.yaml.
 PRODUCT_LISTED = "bolrg9mcadqiejd0"
