@@ -13,9 +13,13 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.device_registry import async_get as async_get_device_registry
+from homeassistant.helpers.entity_registry import (
+    async_entries_for_device,
+    async_migrate_entries,
+)
 from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
-from homeassistant.helpers.entity_registry import async_migrate_entries
 from homeassistant.util import slugify
 
 from .bulk_add import async_setup_bulk_services
@@ -1182,3 +1186,24 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
 async def async_update_entry(hass: HomeAssistant, entry: ConfigEntry):
     _LOGGER.debug("Updating entry for device: %s", get_device_id(entry.data))
     hass.config_entries.async_schedule_reload(entry.entry_id)
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, config_entry: ConfigEntry, device_entry: DeviceEntry
+) -> bool:
+    """Allow deleting a device once nothing is attached to it (fork).
+
+    Home Assistant refuses to remove a device from a config entry unless the
+    integration opts in.  This is needed to clean up one specific leftover: before
+    2026.10.0.18 the integration level refresh / logout buttons lived on a device
+    called "Tuya Local", which Home Assistant had attached to whichever entry
+    loaded the button platform first.  Those buttons are plain entities now, so
+    that device stays behind with no entities.
+
+    Only devices with no entities (enabled or disabled) are removable, so the
+    delete action can never strip entities from a working device.
+    """
+    entity_registry = async_get_entity_registry(hass)
+    return not async_entries_for_device(
+        entity_registry, device_entry.id, include_disabled_entities=True
+    )

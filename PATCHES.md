@@ -570,3 +570,20 @@ no device row is created.
 (`identifiers {(tuya_local, hub)}`) stays in the registry with no entities after
 the upgrade. Delete it once in *Settings → Devices* (it shows "0 entities"), or
 remove it from the device registry.
+
+## 19. Allow deleting a device that has no entities left (2026.10.0.19)
+
+**Problem:** after patch #18 the buttons are plain entities, so the device they
+used to live on is left behind with **0 entities**. Home Assistant refuses to
+remove it from the config entry ("Config entry does not support device removal")
+because the integration does not implement the optional removal hook, so the empty
+"Tuya Local" row stayed inside a real device's entry on the integrations page.
+
+**Patch:** `__init__.py` - `async_remove_config_entry_device` returns True only
+when the device has no entities at all (disabled included). With the hook in
+place, *Settings → Devices → the empty device → Delete* works, and the empty
+device can also be removed through the websocket API
+(`config/device_registry/remove_config_entry`).
+
+The guard means the button can never strip entities off a working device: any
+device that still has an entity is not removable.
