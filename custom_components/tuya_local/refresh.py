@@ -36,6 +36,7 @@ NAMES_STORE = "cloud_names_store"
 
 SERVICE_REFRESH_DEVICES = "refresh_devices"
 SERVICE_RELOCATE_DEVICES = "relocate_devices"
+SERVICE_LOGOUT = "logout_cloud"
 
 
 def _store(hass: HomeAssistant) -> Store:
@@ -100,6 +101,39 @@ async def async_relocate_devices(hass: HomeAssistant) -> dict[str, Any]:
     return await macmap.async_relocate_devices(hass, force_protocol=True)
 
 
+async def async_clear_names(hass: HomeAssistant) -> None:
+    """Drop the cached cloud device names: they belong to the login."""
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    domain_data[NAMES_CACHE] = {}
+    try:
+        await _store(hass).async_remove()
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("Could not remove the cached Tuya device names: %s", err)
+
+
+async def async_handle_logout(call: ServiceCall) -> dict[str, Any]:
+    """Forget the Tuya cloud login.
+
+    Device control is local, so every configured device keeps working; what goes
+    away is the cloud side: the account that labels discovered devices and
+    supplies the local keys offered when adding one.  The next device added
+    through the cloud path asks for a login again, which is how you switch
+    accounts.
+    """
+    from .cloud import async_forget_auth, async_restore_auth
+
+    hass = call.hass
+    # Make sure the saved login has been loaded before deciding what is there.
+    await async_restore_auth(hass)
+    had_login = await async_forget_auth(hass)
+    await async_clear_names(hass)
+    if had_login:
+        _LOGGER.warning("Tuya cloud login removed; local device control is unchanged")
+    else:
+        _LOGGER.info("Tuya cloud logout requested but no login was saved")
+    return {"success": True, "was_authenticated": had_login}
+
+
 async def async_handle_relocate_devices(call: ServiceCall) -> dict[str, Any]:
     """Service handler: relocate devices and report what changed."""
     from .cloud import async_restore_auth
@@ -157,6 +191,13 @@ async def async_setup_refresh_services(hass: HomeAssistant) -> None:
         DOMAIN,
         SERVICE_RELOCATE_DEVICES,
         async_handle_relocate_devices,
+        schema=vol.Schema({}),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_LOGOUT,
+        async_handle_logout,
         schema=vol.Schema({}),
         supports_response=SupportsResponse.OPTIONAL,
     )

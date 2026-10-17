@@ -34,7 +34,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
     domain_data = hass.data.setdefault(DOMAIN, {})
     if not domain_data.get(HUB_BUTTON_CREATED):
         domain_data[HUB_BUTTON_CREATED] = True
-        async_add_entities([TuyaLocalRefreshButton()])
+        async_add_entities([TuyaLocalRefreshButton(), TuyaLocalCloudLogoutButton()])
 
 
 class TuyaLocalRefreshButton(ButtonEntity):
@@ -60,6 +60,31 @@ class TuyaLocalRefreshButton(ButtonEntity):
         await self.hass.services.async_call(
             DOMAIN, "refresh_devices", {}, blocking=True
         )
+
+
+class TuyaLocalCloudLogoutButton(ButtonEntity):
+    """Integration level button that forgets the saved Tuya cloud login.
+
+    Device control stays local, so devices keep working; the cloud side (device
+    names, and the local keys offered when adding a device) is what goes away.
+    Pressing it and then adding a device through the cloud path logs in again,
+    which is how you switch Tuya accounts.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Logout Tuya account"
+    _attr_unique_id = "tuya_local_logout_cloud"
+    _attr_icon = "mdi:logout"
+    _attr_device_info = DeviceInfo(
+        identifiers={(DOMAIN, "hub")},
+        name="Tuya Local",
+        manufacturer="tuya-local",
+        entry_type=DeviceEntryType.SERVICE,
+    )
+
+    async def async_press(self) -> None:
+        """Handle the button press."""
+        await self.hass.services.async_call(DOMAIN, "logout_cloud", {}, blocking=True)
 
 
 class TuyaLocalButton(TuyaLocalEntity, ButtonEntity):

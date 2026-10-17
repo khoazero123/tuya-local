@@ -99,6 +99,22 @@ def async_save_auth(hass: HomeAssistant, auth: dict[str, Any] | None) -> None:
         hass.async_create_task(store.async_remove())
 
 
+async def async_forget_auth(hass: HomeAssistant) -> bool:
+    """Forget the saved login, memory and disk, and say whether one existed.
+
+    Awaited (unlike the fire-and-forget save/clear used from the login paths), so
+    a service that logs out can report the result.
+    """
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    had_login = bool(domain_data.get(AUTH_CACHE))
+    domain_data[AUTH_CACHE] = None
+    try:
+        await _get_auth_store(hass).async_remove()
+    except Exception as err:  # noqa: BLE001 - the file may already be gone
+        _LOGGER.warning("Could not remove the saved Tuya cloud login: %s", err)
+    return had_login
+
+
 class Cloud:
     """Optional Tuya cloud interface for getting device information."""
 

@@ -492,3 +492,38 @@ So the flow was ~47 s: two cloud round trips plus the config scan.
 **Notes:** the cache lives for the process; a device added in the app between two
 fetches shows up after the TTL, or immediately with `force=True`
 (`tuya_local.refresh_devices` still forces a fresh read).
+
+## 16. Log out of the Tuya cloud, from a button (2026.10.0.16)
+
+**Problem:** patch #1 keeps the cloud login on disk so the QR/user-code login is
+not needed after every restart, but there was **no way to forget it** — switching
+to another Tuya account (or clearing a login that belongs to somebody else) meant
+deleting `/config/.storage/tuya_local.cloud_auth` by hand.
+
+**Patch:**
+
+- `custom_components/tuya_local/cloud.py`
+  - `async_forget_auth(hass)`: clears the cached login **and** awaits the store
+    removal, returning whether a login was there (the existing fire-and-forget
+    `async_save_auth(None)` cannot report that).
+- `custom_components/tuya_local/refresh.py`
+  - service **`tuya_local.logout_cloud`** (response optional): restores the saved
+    login first (so the answer is accurate), forgets it, and drops the cached
+    cloud device names — they belong to the login that just went away;
+  - returns `{"success": true, "was_authenticated": <bool>}`.
+- `custom_components/tuya_local/button.py`
+  - integration level button **"Logout Tuya account"**
+    (`button.tuya_local_logout_tuya_account`, `mdi:logout`) next to the existing
+    "Refresh device list" button, on the same "Tuya Local" service device.
+- `services.yaml`: documents `logout_cloud`.
+- `tests/test_logout_ha.py` (new, 5 tests): memory + disk cleared, the "no login"
+  answer, configured devices untouched, cached names dropped, the button logs out.
+
+**Notes:**
+
+- **Device control is local and keeps working**; only the cloud side goes away
+  (names for discovered cards, and the local keys offered when adding a device).
+- To switch accounts: press the button, then *Add device* → SmartLife
+  cloud-assisted → log in with the other account.
+- The button appears once per installation (same guard as the refresh button) and
+  on the "Tuya Local" service device.

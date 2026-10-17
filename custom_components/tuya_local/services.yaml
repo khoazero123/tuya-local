@@ -105,3 +105,13 @@ add_all_devices:
       default: true
       selector:
         boolean:
+
+logout_cloud:
+  name: Logout from the Tuya cloud
+  description: >-
+    Forget the saved Tuya cloud login (memory and disk). Device control is local,
+    so every configured device keeps working; what is removed is the cloud side:
+    the account that labels discovered devices and supplies the local keys
+    offered when adding a device. Add a device through the cloud path afterwards
+    to log in again, with the same or another account.
+  fields: {}
