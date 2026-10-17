@@ -38,9 +38,11 @@ from .const import (
     CONF_MODEL,
     CONF_POLL_ONLY,
     CONF_PROTOCOL_VERSION,
+    CONF_SERVICE_ENTRY,
     CONF_TYPE,
     CONF_USER_CODE,
     DATA_STORE,
+    SERVICE_ENTRY_TITLE,
 )
 from .device import TuyaLocalDevice
 from .helpers.config import get_device_id
@@ -60,6 +62,20 @@ DEVICE_DETAILS_URL = (
 class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
     VERSION = 13
     MINOR_VERSION = 24
+
+    async def async_step_import(self, import_config=None):
+        """Create the entry that owns the integration level buttons.
+
+        Started by the integration itself (PATCHES.md #20): the two integration
+        level buttons need a device, Home Assistant ties every device to a config
+        entry, and this integration has one entry per device.
+        """
+        if not import_config or not import_config.get(CONF_SERVICE_ENTRY):
+            return self.async_abort(reason="import_failed")
+        return self.async_create_entry(
+            title=SERVICE_ENTRY_TITLE, data=dict(import_config)
+        )
+
     CONNECTION_CLASS = CONN_CLASS_LOCAL_PUSH
     device = None
     data = {}

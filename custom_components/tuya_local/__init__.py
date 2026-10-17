@@ -29,6 +29,7 @@ from .const import (
     CONF_LOCAL_KEY,
     CONF_POLL_ONLY,
     CONF_PROTOCOL_VERSION,
+    CONF_SERVICE_ENTRY,
     CONF_TYPE,
     DOMAIN,
 )
@@ -41,6 +42,36 @@ from .services import async_setup_services
 
 _LOGGER = logging.getLogger(__name__)
 NOT_FOUND = "Configuration file for %s not found"
+
+_SERVICE_ENTRY_ENSURED = "tuya_local_service_entry_ensured"
+
+
+def is_service_entry(entry: ConfigEntry) -> bool:
+    """Return True for the entry that only owns the integration level buttons."""
+    return bool(entry.data.get(CONF_SERVICE_ENTRY))
+
+
+async def async_ensure_service_entry(hass: HomeAssistant) -> None:
+    """Create the entry that owns the integration level buttons, once.
+
+    Home Assistant ties every device to a config entry, and this integration has
+    one entry per device - so a device holding integration wide buttons used to
+    end up inside whichever real device's entry loaded first (PATCHES.md #18).
+    Its own entry gives it its own section in the UI.
+    """
+    meta = hass.data.setdefault(_SERVICE_ENTRY_ENSURED, {})
+    if meta.get("done"):
+        return
+    meta["done"] = True
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if is_service_entry(entry):
+            return
+    _LOGGER.debug("Adding the Tuya Local service entry")
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "import"}, data={CONF_SERVICE_ENTRY: True}
+    )
+    if result.get("type") != "create_entry":
+        _LOGGER.warning("Could not add the Tuya Local service entry: %s", result)
 
 
 def replace_unique_ids(entity_entry, device_id, conf_file, replacements):
@@ -1095,6 +1126,12 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
+    if is_service_entry(entry):
+        # Only the integration level buttons; no device connection.
+        await hass.config_entries.async_forward_entry_setups(entry, ["button"])
+        return True
+
+    await async_ensure_service_entry(hass)
     device_id = get_device_id(entry.data)
     _LOGGER.debug(
         "Setting up entry for device: %s",
@@ -1143,6 +1180,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
+    if is_service_entry(entry):
+        return await hass.config_entries.async_forward_entry_unload(entry, "button")
+
     device_id = get_device_id(entry.data)
     _LOGGER.debug("Unloading entry for device: %s", device_id)
     config = entry.data
@@ -1175,7 +1215,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     remaining = [
         e
         for e in hass.config_entries.async_entries(DOMAIN)
-        if e.entry_id != entry.entry_id
+        if e.entry_id != entry.entry_id and not is_service_entry(e)
     ]
     if not remaining:
         async_stop_discovery(hass)

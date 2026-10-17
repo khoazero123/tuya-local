@@ -13,6 +13,11 @@ CONF_IR2MQTT_BRIDGE = "ir2mqtt_bridge"
 CONF_PROTOCOL_VERSION = "protocol_version"
 API_PROTOCOL_VERSIONS = [3.3, 3.1, 3.2, 3.4, 3.5, 3.22, 3.42, 3.52]
 
+# Marks the config entry that exists only to own the integration level buttons.
+# Data only, no device: see PATCHES.md #20.
+CONF_SERVICE_ENTRY = "service_entry"
+SERVICE_ENTRY_TITLE = "Tuya Local"
+
 CONF_APP_TYPE = "tuya_app_type"
 CONF_ENDPOINT = "endpoint"
 CONF_TERMINAL_ID = "terminal_id"

@@ -11,6 +11,7 @@ from custom_components.tuya_local.const import (
     CONF_DEVICE_ID,
     CONF_LOCAL_KEY,
     CONF_PROTOCOL_VERSION,
+    CONF_SERVICE_ENTRY,
     CONF_TYPE,
     DOMAIN,
 )
@@ -106,16 +107,44 @@ async def test_logout_clears_the_cached_device_names(hass):
     assert await refresh._store(hass).async_load() is None
 
 
-async def test_the_integration_buttons_have_no_device(hass):
-    """Both integration level buttons are plain entities, not devices."""
+async def test_the_integration_buttons_share_their_own_device(hass):
+    """Both integration level buttons live on the "hub" device."""
     from custom_components.tuya_local.button import TuyaLocalRefreshButton
 
     refresh_button = TuyaLocalRefreshButton()
-    assert refresh_button.device_info is None
-    assert refresh_button.name == "Tuya Local Refresh device list"
-    # The name is spelled out so the entity id stays
-    # button.tuya_local_refresh_device_list (unchanged for existing installs).
+    logout_button = TuyaLocalCloudLogoutButton()
+
+    for button in (refresh_button, logout_button):
+        assert button.device_info is not None
+        assert button.device_info["identifiers"] == {(DOMAIN, "hub")}
+        assert button.device_info["name"] == "Tuya Local"
+        assert button.device_info["entry_type"] == "service"
     assert refresh_button.unique_id == "tuya_local_refresh_devices"
+    assert refresh_button.name == "Refresh device list"
+
+
+async def test_the_service_entry_only_adds_the_two_buttons(hass):
+    """The service entry adds the integration buttons and nothing else."""
+    from custom_components.tuya_local.button import (
+        TuyaLocalCloudLogoutButton,
+        TuyaLocalRefreshButton,
+        async_setup_entry,
+    )
+
+    added = []
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=1,
+        minor_version=1,
+        title="Tuya Local",
+        data={CONF_SERVICE_ENTRY: True},
+    )
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    assert [type(e) for e in added] == [
+        TuyaLocalRefreshButton,
+        TuyaLocalCloudLogoutButton,
+    ]
 
 
 async def test_the_button_logs_out(hass):
@@ -125,12 +154,9 @@ async def test_the_button_logs_out(hass):
     button = TuyaLocalCloudLogoutButton()
     button.hass = hass
 
-    assert button.name == "Tuya Local Logout Tuya account"
+    assert button.name == "Logout Tuya account"
     assert button.unique_id == "tuya_local_logout_cloud"
     assert button.icon == "mdi:logout"
-    # fork: no device card - Home Assistant would attach it to whichever config
-    # entry loaded first, showing it as a device inside that device's entry.
-    assert button.device_info is None
 
     await button.async_press()
     await hass.async_block_till_done()

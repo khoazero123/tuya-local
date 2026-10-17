@@ -587,3 +587,38 @@ device can also be removed through the websocket API
 
 The guard means the button can never strip entities off a working device: any
 device that still has an entity is not removable.
+
+## 20. Give the integration level buttons their own config entry (2026.10.0.20)
+
+**Problem:** patches #18 / #19 removed the confusing device row by removing the
+device, which also removed the thing the buttons were found under. Home Assistant
+requires every device to belong to a config entry (`async_get_or_create` takes
+`config_entry_id` as a required argument), and this integration has one entry per
+device, so a shared device inevitably lands inside a real device's entry.
+
+**Patch:** the integration now creates **one service entry** (title "Tuya Local",
+data `{service_entry: true}`, no device connection) that exists only to own the
+device holding the two buttons.
+
+- `const.py`: `CONF_SERVICE_ENTRY`.
+- `__init__.py`:
+  - `is_service_entry()` helper;
+  - `async_ensure_service_entry()` creates the entry once, guarded, from the first
+    real entry's setup (an existing service entry is never duplicated);
+  - `async_setup_entry()` forwards only the `button` platform for it, and skips all
+    device connection logic;
+  - `async_unload_entry()` unloads the platform for it;
+  - the "last device removed, stop discovery" check ignores the service entry.
+- `button.py`: the service entry adds exactly the two integration buttons; device
+  entries no longer do (the "created once from whichever entry loads first" hack
+  is gone). Both buttons declare `device_info` again: identifiers
+  `{(tuya_local, hub)}`, name "Tuya Local", `entry_type=service`.
+- `mobile_api.py`: `list_configured` skips the service entry (it is not a device).
+
+**Result on the integrations page:** an entry card "Tuya Local" whose only device
+row is "Tuya Local" with the two buttons - separate from every real device's entry.
+Entity ids are unchanged: `button.tuya_local_refresh_device_list`,
+`button.tuya_local_logout_tuya_account`.
+
+Patches #18 / #19 stay: an empty leftover device is still removable, and the strict
+`async_remove_config_entry_device` guard remains.

@@ -5,8 +5,9 @@ Setup for different kinds of Tuya button devices
 import logging
 
 from homeassistant.components.button import ButtonDeviceClass, ButtonEntity
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 
-from .const import DOMAIN
+from .const import CONF_SERVICE_ENTRY, DOMAIN
 from .device import TuyaLocalDevice
 from .entity import TuyaLocalEntity
 from .helpers.config import async_tuya_setup_platform
@@ -14,10 +15,23 @@ from .helpers.device_config import TuyaEntityConfig
 
 _LOGGER = logging.getLogger(__name__)
 
-HUB_BUTTON_CREATED = "hub_button_created"
+DEVICE_INFO = DeviceInfo(
+    identifiers={(DOMAIN, "hub")},
+    name="Tuya Local",
+    manufacturer="tuya-local",
+    model="Integration services",
+    entry_type=DeviceEntryType.SERVICE,
+)
 
 
 async def async_setup_entry(hass, config_entry, async_add_entities):
+    # The service entry exists only to own the integration level buttons, so they
+    # get a device of their own instead of landing inside a real device's entry
+    # (PATCHES.md #20).  It has no device connection to set up.
+    if config_entry.data.get(CONF_SERVICE_ENTRY):
+        async_add_entities([TuyaLocalRefreshButton(), TuyaLocalCloudLogoutButton()])
+        return
+
     config = {**config_entry.data, **config_entry.options}
     await async_tuya_setup_platform(
         hass,
@@ -27,14 +41,6 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         TuyaLocalButton,
     )
 
-    # The integration level "Refresh device list" button: created once, from
-    # whichever config entry loads the button platform first (only after the
-    # per-device setup succeeded, so invalid entries don't register it).
-    domain_data = hass.data.setdefault(DOMAIN, {})
-    if not domain_data.get(HUB_BUTTON_CREATED):
-        domain_data[HUB_BUTTON_CREATED] = True
-        async_add_entities([TuyaLocalRefreshButton(), TuyaLocalCloudLogoutButton()])
-
 
 class TuyaLocalRefreshButton(ButtonEntity):
     """Integration level button that refreshes the device list.
@@ -43,14 +49,11 @@ class TuyaLocalRefreshButton(ButtonEntity):
     names from the Tuya cloud and re-runs the LAN discovery scan.
     """
 
-    # No device_info on purpose: Home Assistant attaches every device to the config
-    # entry whose setup created it, so this integration level button used to appear
-    # as a "Tuya Local" device inside whichever real device's entry loaded first
-    # (see PATCHES.md #18).  As a plain entity it is still registered, still
-    # pressable and still available to automations, just without a device card.
-    _attr_name = "Tuya Local Refresh device list"
+    _attr_has_entity_name = True
+    _attr_name = "Refresh device list"
     _attr_unique_id = "tuya_local_refresh_devices"
     _attr_icon = "mdi:refresh"
+    _attr_device_info = DEVICE_INFO
 
     async def async_press(self) -> None:
         """Handle the button press."""
@@ -68,10 +71,11 @@ class TuyaLocalCloudLogoutButton(ButtonEntity):
     which is how you switch Tuya accounts.
     """
 
-    # No device_info, for the same reason as TuyaLocalRefreshButton.
-    _attr_name = "Tuya Local Logout Tuya account"
+    _attr_has_entity_name = True
+    _attr_name = "Logout Tuya account"
     _attr_unique_id = "tuya_local_logout_cloud"
     _attr_icon = "mdi:logout"
+    _attr_device_info = DEVICE_INFO
 
     async def async_press(self) -> None:
         """Handle the button press."""

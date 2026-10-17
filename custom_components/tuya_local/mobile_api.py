@@ -25,6 +25,7 @@ from .const import (
     CONF_LOCAL_KEY,
     CONF_POLL_ONLY,
     CONF_PROTOCOL_VERSION,
+    CONF_SERVICE_ENTRY,
     CONF_TYPE,
     DOMAIN,
 )
@@ -248,6 +249,8 @@ async def async_handle_list_configured(call: ServiceCall) -> dict[str, Any]:
     hass = call.hass
     devices = []
     for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.data.get(CONF_SERVICE_ENTRY):
+            continue
         data = {**entry.data, **entry.options}
         devices.append(
             {
