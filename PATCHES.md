@@ -622,3 +622,33 @@ Entity ids are unchanged: `button.tuya_local_refresh_device_list`,
 
 Patches #18 / #19 stay: an empty leftover device is still removable, and the strict
 `async_remove_config_entry_device` guard remains.
+
+## 21. Show each device's LAN IP and MAC as diagnostic sensors (2026.10.0.21)
+
+**Request:** every tuya_local device should also show its LAN address and its MAC
+address.
+
+**Patch:**
+
+- `sensor.py`
+  - `TuyaLocalIpAddressSensor` ("IP address", `mdi:ip-network`) reads the host from
+    **the config entry it is attached to**, so it follows a device that was
+    relocated to a new address (patch #5 updates the entry);
+  - `TuyaLocalMacAddressSensor` ("MAC address", `mdi:identifier`) prefers the MAC
+    remembered by `macmap` (learned and verified in patch #5), and falls back to
+    the ARP table entry for the device's current host;
+  - both are `EntityCategory.DIAGNOSTIC`, so they appear in the device page under
+    "Diagnostics" and do not clutter the main entity list;
+  - `async_setup_entry` now always adds them, even for devices without sensor dps
+    (it used to raise `ValueError` for those), and still raises when the device
+    config itself is missing.
+- `__init__.py`: `"sensor"` is always forwarded for a device entry, since devices
+  without sensor dps would never reach the sensor platform.
+
+**Notes:**
+
+- values are polled (30 s default), so the MAC appears once discovery learns it;
+- the MAC is **not** added as a device connection: that would make Home Assistant
+  merge this device with another integration's device declaring the same MAC.
+
+Tests: `tests/test_lan_sensors.py` (new, 4) plus updated `tests/test_sensor.py`.

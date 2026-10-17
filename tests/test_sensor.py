@@ -35,7 +35,9 @@ async def test_init_entry(hass):
 
     await async_setup_entry(hass, entry, m_add_entities)
     assert type(hass.data[DOMAIN]["dummy"]["sensor_temperature"]) is TuyaLocalSensor
-    m_add_entities.assert_called_once()
+    # fork: the second call adds the LAN IP / MAC diagnostic sensors
+    # (PATCHES.md #21).
+    assert m_add_entities.call_count == 2
 
 
 @pytest.mark.asyncio
@@ -55,12 +57,15 @@ async def test_init_entry_fails_if_device_has_no_sensor(hass):
     hass.data[DOMAIN] = {
         "dummy": {"device": m_device},
     }
-    try:
-        await async_setup_entry(hass, entry, m_add_entities)
-        assert False
-    except ValueError:
-        pass
-    m_add_entities.assert_not_called()
+    # fork: no sensor dps is no longer an error - the device still gets the LAN
+    # IP / MAC diagnostic sensors (PATCHES.md #21).
+    await async_setup_entry(hass, entry, m_add_entities)
+    assert m_add_entities.call_count == 1
+    added = m_add_entities.call_args[0][0]
+    assert [type(e).__name__ for e in added] == [
+        "TuyaLocalIpAddressSensor",
+        "TuyaLocalMacAddressSensor",
+    ]
 
 
 @pytest.mark.asyncio
