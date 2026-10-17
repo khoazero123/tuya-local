@@ -364,3 +364,49 @@ offline: one LAN sweep, and at most one handshake scan per 10 minutes.
   until it has been in use for a while.  Merging it back brings #11 on top of the
   default line; patch #12 is already there, so only the accounts files should
   conflict.
+
+## 13. Add every device of the account after a login (2026.10.0.12)
+
+**Problem:** after the cloud login the devices still had to be added one at a
+time (choose the device → review → submit). The login already returns the whole
+device list **with each device's local key**, so that is busywork — and on a
+second box with ~25 devices it is a lot of it.
+
+**Patch:**
+
+- `custom_components/tuya_local/bulk_add.py` (new)
+  - `async_plan_devices()` classifies the whole account in one pass: one LAN scan
+    (`tinytuya.deviceScan`) for the addresses the cloud does not report, one pass
+    over `devices/*.yaml` to map product ids to config types, then a concurrent
+    TCP check on the Tuya port so the plan can say which devices answer now;
+  - a device is skipped, **with a reason**, when it is already configured, is a
+    hub, has no local key, is marked cloud-only, has no known LAN address, or when
+    no device config lists its product id;
+  - `async_add_planned()` creates the entries through the same flow the mobile app
+    uses (`source=mobile`) and reports per-device failures instead of aborting the
+    batch;
+  - service `tuya_local.add_all_devices` (`dry_run` default **true**,
+    `include_unreachable` default true) returns the plan, or the result when
+    `dry_run: false`.
+- `custom_components/tuya_local/config_flow.py`
+  - after a login that did not come from a discovered card, the flow lands on a
+    new **`add_all`** step: the plan as one line of summary, one checkbox to add
+    them all; unticking falls back to the old single-device picker.
+- `services.yaml` + `translations/en.json`: the service, the step and the abort
+  text.
+- `tests/test_bulk_add_ha.py` (new, 6 tests): classification, LAN-address
+  fallback, the unreachable filter, dry run, real creation, per-device failure.
+
+**Notes:**
+
+- Product matching uses `matches_product()`, **not** `matches()`: a config with no
+  required DP matches any product id, which would silently pick the wrong type.
+- A device whose type cannot be derived is **reported, never guessed** — an entry
+  with the wrong type loads without the expected entities, which is worse than a
+  visible skip.
+- When several configs list the same product id, the first (alphabetical) is used
+  and the rest are returned in `alternatives`, so a wrong pick can be spotted.
+- Sub-devices behind a hub are skipped in this version: their `cid` handling is a
+  separate piece of work.
+- This is on the default line (one cloud account); the multi-account branch will
+  take it over when merged.

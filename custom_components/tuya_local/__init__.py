@@ -18,6 +18,7 @@ from homeassistant.helpers.entity_registry import async_get as async_get_entity_
 from homeassistant.helpers.entity_registry import async_migrate_entries
 from homeassistant.util import slugify
 
+from .bulk_add import async_setup_bulk_services
 from .const import (
     CONF_DEVICE_CID,
     CONF_DEVICE_ID,
@@ -1128,6 +1129,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     await async_setup_services(hass, entities)
     # Integration level services (refresh device list), registered once.
     await async_setup_refresh_services(hass)
+    # Bulk add (add every device of the cloud account) once.
+    await async_setup_bulk_services(hass)
     await async_setup_mobile_services(hass)
 
     entry.add_update_listener(async_update_entry)

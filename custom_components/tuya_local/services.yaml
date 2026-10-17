@@ -80,3 +80,28 @@ send_learned_ir_command:
         entity:
           filter:
             domain: infrared
+
+add_all_devices:
+  name: Add all devices from the Tuya account
+  description: >-
+    Plan and add every device of the connected Tuya cloud account in one go.
+    Devices already configured, hubs (and their sub-devices), devices without a
+    local key, devices the cloud marks cloud-only, devices with no LAN address,
+    and devices whose product id matches no device config are skipped and
+    reported with a reason. With dry_run (the default) nothing is created and the
+    plan is returned so it can be reviewed first.
+  fields:
+    dry_run:
+      name: Dry run
+      description: Only return the plan, create nothing
+      default: true
+      selector:
+        boolean:
+    include_unreachable:
+      name: Include unreachable
+      description: >-
+        Also add devices that are not answering on the LAN right now (they come
+        up when they are powered on)
+      default: true
+      selector:
+        boolean:

@@ -66,10 +66,12 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
     __qr_code: str | None = None
     __cloud_devices: dict[str, Any] = {}
     __discovered_device: dict[str, Any] | None = None
+    __bulk_plan: dict[str, Any] | None = None
 
     def __init__(self) -> None:
         """Initialize the config flow."""
         self.cloud = None
+        self.__bulk_plan = None
 
     def init_cloud(self):
         if self.cloud is None:
@@ -316,7 +318,52 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
                     "product_name"
                 )
             return await self.async_step_local()
-        return await self.async_step_choose_device()
+        return await self.async_step_add_all()
+
+    async def async_step_add_all(self, user_input=None):
+        """Offer to add every device on the account, straight after a login.
+
+        The cloud list already carries each device's local key, so picking them
+        one at a time is busywork.  The plan says what can be added and why the
+        rest cannot; one submit adds them all, and declining falls back to the
+        single-device picker.
+        """
+        from .bulk_add import async_add_planned, async_plan_devices
+
+        if user_input is None:
+            plan = await async_plan_devices(self.hass)
+            self.__bulk_plan = plan
+            reasons = {}
+            for item in plan["skip"]:
+                reasons[item["reason"]] = reasons.get(item["reason"], 0) + 1
+            detail = ", ".join(
+                f"{reason} ×{count}" for reason, count in sorted(reasons.items())
+            )
+            summary = f"{len(plan['add'])}/{plan['found']} device(s) can be added"
+            if detail:
+                summary = f"{summary} — skipped: {detail}"
+            if not plan["add"]:
+                # Nothing can be added automatically (no cloud login, nothing
+                # addable, or nothing left to add): fall back to the picker.
+                return await self.async_step_choose_device()
+            return self.async_show_form(
+                step_id="add_all",
+                data_schema=vol.Schema({vol.Required("add_all", default=True): bool}),
+                description_placeholders={"summary": summary},
+            )
+
+        if not user_input.get("add_all"):
+            return await self.async_step_choose_device()
+
+        plan = self.__bulk_plan or await async_plan_devices(self.hass)
+        result = await async_add_planned(self.hass, plan)
+        return self.async_abort(
+            reason="devices_added",
+            description_placeholders={
+                "added": str(len(result["added"])),
+                "failed": str(len(result["failed"])),
+            },
+        )
 
     async def async_step_choose_device(self, user_input=None):
         errors = {}
