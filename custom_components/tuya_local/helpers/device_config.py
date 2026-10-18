@@ -594,6 +594,15 @@ class TuyaDpsConfig:
         if self.invalid_for(value, device):
             raise AttributeError(f"{self.name} cannot be set at this time")
         settings = self.get_values_to_set(device, value)
+        # Keep the values we are about to send: a Zigbee device answers through its
+        # hub, so the next poll still carries the old value for a few seconds and
+        # would flip the entity back and forth (PATCHES.md #32).  This covers every
+        # platform, since they all set values through here.
+        for dp_id, dp_value in settings.items():
+            try:
+                device.anticipate_property_value(dp_id, dp_value)
+            except Exception as err:  # noqa: BLE001 - anticipation is best effort
+                _LOGGER.debug("Could not anticipate %s: %s", dp_id, err)
         await device.async_set_properties(settings)
 
     def mapping_available(self, mapping, device):

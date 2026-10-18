@@ -756,3 +756,48 @@ async def test_refresh_error_914_stays_quiet_when_rotating_protocols(
         await subject.async_refresh()
 
     assert caplog.text == ""
+
+
+def test_merge_poll_ignores_the_stale_echo_of_a_just_set_value():
+    """A poll carrying the old value must not undo what we just set (#32)."""
+
+    from custom_components.tuya_local.device import TuyaLocalDevice
+
+    device = TuyaLocalDevice.__new__(TuyaLocalDevice)
+    device._cached_state = {1: False, "updated_at": 0}
+    device._anticipated = {}
+
+    device.anticipate_property_value(1, True)
+    assert device._cached_state[1] is True
+
+    # the hub still reports the old value: ignore it
+    device._merge_poll({1: False})
+    assert device._cached_state[1] is True
+
+
+def test_merge_poll_accepts_the_value_once_the_device_catches_up():
+    from custom_components.tuya_local.device import TuyaLocalDevice
+
+    device = TuyaLocalDevice.__new__(TuyaLocalDevice)
+    device._cached_state = {1: False, "updated_at": 0}
+    device._anticipated = {}
+
+    device.anticipate_property_value(1, True)
+    device._merge_poll({1: True})
+
+    assert device._cached_state[1] is True
+    assert device._anticipated == {}  # nothing left to anticipate
+
+
+def test_anticipation_expires():
+    from custom_components.tuya_local.device import TuyaLocalDevice
+
+    device = TuyaLocalDevice.__new__(TuyaLocalDevice)
+    device._cached_state = {1: False, "updated_at": 0}
+    device._anticipated = {}
+
+    device.anticipate_property_value(1, True, seconds=0)
+    device._merge_poll({1: False})
+
+    # the window has passed: trust the device again
+    assert device._cached_state[1] is False

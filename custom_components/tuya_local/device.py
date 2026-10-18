@@ -150,6 +150,14 @@ class TuyaLocalDevice(object):
         # Diagnostics for the extra sensors (PATCHES.md #22).
         self._last_error = None
         self._last_response_ms = None
+        # {dp: (value, expires_at)} for values we have set but the device (or its
+        # hub, for Zigbee) has not echoed back yet.  Without this, the next poll
+        # reports the old value and the entity flips back (PATCHES.md #32).
+        self._anticipated = {}
+        # Sub devices answer through their hub: a command can take 10+ seconds to
+        # come back in a poll (measured: 13 s), so hold the expected value longer
+        # than for a WiFi device, which echoes it in well under a second.
+        self._anticipate_seconds = 25 if dev_cid else 6
 
         # API calls to update Tuya devices are asynchronous and non-blocking.
         # This means you can send a change and immediately request an updated
@@ -315,8 +323,7 @@ class TuyaLocalDevice(object):
                         log_json(poll),
                     )
                     full_poll = poll.pop("full_poll", False)
-                    self._cached_state = self._cached_state | poll
-                    self._cached_state["updated_at"] = time()
+                    self._merge_poll(poll)
                     self._remove_properties_from_pending_updates(poll)
 
                     for entity in self._children:
@@ -590,20 +597,47 @@ class TuyaLocalDevice(object):
     async def async_set_property(self, dps_id, value):
         await self.async_set_properties({dps_id: value})
 
-    def anticipate_property_value(self, dps_id, value):
-        """
-        Update a value in the cached state only. This is good for when you
-        know the device will reflect a new state in the next update, but
-        don't want to wait for that update for the device to represent
-        this state.
+    def anticipate_property_value(self, dps_id, value, seconds: float | None = None):
+        """Record a value we have just set, so polls do not undo it.
 
-        The anticipated value will be cleared with the next update.
+        Used by the platforms after they send a command.  The value is held until
+        the device reports it (or ``seconds`` elapse), which matters for Zigbee
+        devices that answer through a hub with a 1-3 s delay.
         """
+        window = getattr(self, "_anticipate_seconds", 6) if seconds is None else seconds
+        self._anticipated[dps_id] = (value, time() + window)
         self._cached_state[dps_id] = value
+
+    def _merge_poll(self, dps: dict) -> None:
+        """Merge a poll, keeping values we just set until the device echoes them.
+
+        Zigbee devices answer through their hub: a command takes 1-3 s to show up in
+        the next poll, and in between the poll still carries the old value.  Merging
+        it would flip the entity back (and back again), which is exactly what users
+        see as \"on, off, on\".
+        """
+        now = time()
+        accepted = {}
+        for key, value in dps.items():
+            anticipated = self._anticipated.get(key)
+            if anticipated is not None:
+                expected, expires = anticipated
+                if now < expires:
+                    if value == expected:
+                        # The device caught up: stop anticipating this dp.
+                        self._anticipated.pop(key, None)
+                    else:
+                        continue  # stale echo of the old value, ignore it
+                else:
+                    self._anticipated.pop(key, None)
+            accepted[key] = value
+        self._cached_state = self._cached_state | accepted
+        self._cached_state["updated_at"] = now
 
     def _reset_cached_state(self):
         self._cached_state = {"updated_at": 0}
         self._pending_updates = {}
+        self._anticipated = {}
         self._last_connection = 0
         self._last_full_poll = 0
 
@@ -611,8 +645,7 @@ class TuyaLocalDevice(object):
         new_state = self._api.status()
         if new_state:
             if "Err" not in new_state:
-                self._cached_state = self._cached_state | new_state.get("dps", {})
-                self._cached_state["updated_at"] = time()
+                self._merge_poll(new_state.get("dps", {}))
                 for entity in self._children:
                     for dp in entity._config.dps():
                         # Clear non-persistant dps that were not in the poll

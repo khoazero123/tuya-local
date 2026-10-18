@@ -46,6 +46,11 @@ NOT_FOUND = "Configuration file for %s not found"
 _SERVICE_ENTRY_ENSURED = "tuya_local_service_entry_ensured"
 
 
+def entry_type(entry: ConfigEntry) -> str:
+    """Return the device type in use: options win over data (PATCHES.md #24)."""
+    return {**entry.data, **entry.options}.get(CONF_TYPE)
+
+
 def is_service_entry(entry: ConfigEntry) -> bool:
     """Return True for the entry that only owns the integration level buttons."""
     return bool(entry.data.get(CONF_SERVICE_ENTRY))
@@ -226,10 +231,10 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
         old_id = get_device_unique_id(entry)
         conf_file = await hass.async_add_executor_job(
             get_config,
-            entry.data[CONF_TYPE],
+            entry_type(entry),
         )
         if conf_file is None:
-            _LOGGER.error(NOT_FOUND, entry.data[CONF_TYPE])
+            _LOGGER.error(NOT_FOUND, entry_type(entry))
             return False
 
         @callback
@@ -310,12 +315,12 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
         device_id = get_device_unique_id(entry)
         conf_file = await hass.async_add_executor_job(
             get_config,
-            entry.data[CONF_TYPE],
+            entry_type(entry),
         )
         if conf_file is None:
             _LOGGER.error(
                 NOT_FOUND,
-                entry.data[CONF_TYPE],
+                entry_type(entry),
             )
             return False
 
@@ -357,12 +362,12 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
         device_id = get_device_unique_id(entry)
         conf_file = await hass.async_add_executor_job(
             get_config,
-            entry.data[CONF_TYPE],
+            entry_type(entry),
         )
         if conf_file is None:
             _LOGGER.error(
                 NOT_FOUND,
-                entry.data[CONF_TYPE],
+                entry_type(entry),
             )
             return False
 
@@ -417,12 +422,12 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
         device_id = get_device_unique_id(entry)
         conf_file = await hass.async_add_executor_job(
             get_config,
-            entry.data[CONF_TYPE],
+            entry_type(entry),
         )
         if conf_file is None:
             _LOGGER.error(
                 NOT_FOUND,
-                entry.data[CONF_TYPE],
+                entry_type(entry),
             )
             return False
 
@@ -465,12 +470,12 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
         device_id = get_device_unique_id(entry)
         conf_file = await hass.async_add_executor_job(
             get_config,
-            entry.data[CONF_TYPE],
+            entry_type(entry),
         )
         if conf_file is None:
             _LOGGER.error(
                 NOT_FOUND,
-                entry.data[CONF_TYPE],
+                entry_type(entry),
             )
             return False
 
@@ -532,12 +537,12 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
         device_id = get_device_unique_id(entry)
         conf_file = await hass.async_add_executor_job(
             get_config,
-            entry.data[CONF_TYPE],
+            entry_type(entry),
         )
         if conf_file is None:
             _LOGGER.error(
                 NOT_FOUND,
-                entry.data[CONF_TYPE],
+                entry_type(entry),
             )
             return False
 
@@ -562,12 +567,12 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
         device_id = get_device_unique_id(entry)
         conf_file = await hass.async_add_executor_job(
             get_config,
-            entry.data[CONF_TYPE],
+            entry_type(entry),
         )
         if conf_file is None:
             _LOGGER.error(
                 NOT_FOUND,
-                entry.data[CONF_TYPE],
+                entry_type(entry),
             )
             return False
 
@@ -603,12 +608,12 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
         device_id = get_device_unique_id(entry)
         conf_file = await hass.async_add_executor_job(
             get_config,
-            entry.data[CONF_TYPE],
+            entry_type(entry),
         )
         if conf_file is None:
             _LOGGER.error(
                 NOT_FOUND,
-                entry.data[CONF_TYPE],
+                entry_type(entry),
             )
             return False
 
@@ -630,12 +635,12 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
         device_id = get_device_unique_id(entry)
         conf_file = await hass.async_add_executor_job(
             get_config,
-            entry.data[CONF_TYPE],
+            entry_type(entry),
         )
         if conf_file is None:
             _LOGGER.error(
                 NOT_FOUND,
-                entry.data[CONF_TYPE],
+                entry_type(entry),
             )
             return False
 
@@ -681,12 +686,12 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
         device_id = get_device_unique_id(entry)
         conf_file = await hass.async_add_executor_job(
             get_config,
-            entry.data[CONF_TYPE],
+            entry_type(entry),
         )
         if conf_file is None:
             _LOGGER.error(
                 NOT_FOUND,
-                entry.data[CONF_TYPE],
+                entry_type(entry),
             )
             return False
 
@@ -708,12 +713,12 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
         device_id = get_device_unique_id(entry)
         conf_file = await hass.async_add_executor_job(
             get_config,
-            entry.data[CONF_TYPE],
+            entry_type(entry),
         )
         if conf_file is None:
             _LOGGER.error(
                 NOT_FOUND,
-                entry.data[CONF_TYPE],
+                entry_type(entry),
             )
             return False
 
@@ -769,12 +774,12 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
         device_id = get_device_unique_id(entry)
         conf_file = await hass.async_add_executor_job(
             get_config,
-            entry.data[CONF_TYPE],
+            entry_type(entry),
         )
         if conf_file is None:
             _LOGGER.error(
                 NOT_FOUND,
-                entry.data[CONF_TYPE],
+                entry_type(entry),
             )
             return False
 
@@ -800,12 +805,12 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
         device_id = get_device_unique_id(entry)
         conf_file = await hass.async_add_executor_job(
             get_config,
-            entry.data[CONF_TYPE],
+            entry_type(entry),
         )
         if conf_file is None:
             _LOGGER.error(
                 NOT_FOUND,
-                entry.data[CONF_TYPE],
+                entry_type(entry),
             )
             return False
 
@@ -846,12 +851,12 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
         device_id = get_device_unique_id(entry)
         conf_file = await hass.async_add_executor_job(
             get_config,
-            entry.data[CONF_TYPE],
+            entry_type(entry),
         )
         if conf_file is None:
             _LOGGER.error(
                 NOT_FOUND,
-                entry.data[CONF_TYPE],
+                entry_type(entry),
             )
             return False
 
@@ -877,12 +882,12 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
         device_id = get_device_unique_id(entry)
         conf_file = await hass.async_add_executor_job(
             get_config,
-            entry.data[CONF_TYPE],
+            entry_type(entry),
         )
         if conf_file is None:
             _LOGGER.error(
                 NOT_FOUND,
-                entry.data[CONF_TYPE],
+                entry_type(entry),
             )
             return False
 
@@ -911,12 +916,12 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
         device_id = get_device_unique_id(entry)
         conf_file = await hass.async_add_executor_job(
             get_config,
-            entry.data[CONF_TYPE],
+            entry_type(entry),
         )
         if conf_file is None:
             _LOGGER.error(
                 NOT_FOUND,
-                entry.data[CONF_TYPE],
+                entry_type(entry),
             )
             return False
 
@@ -939,12 +944,12 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
         device_id = get_device_unique_id(entry)
         conf_file = await hass.async_add_executor_job(
             get_config,
-            entry.data[CONF_TYPE],
+            entry_type(entry),
         )
         if conf_file is None:
             _LOGGER.error(
                 NOT_FOUND,
-                entry.data[CONF_TYPE],
+                entry_type(entry),
             )
             return False
 
@@ -973,12 +978,12 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
         device_id = get_device_unique_id(entry)
         conf_file = await hass.async_add_executor_job(
             get_config,
-            entry.data[CONF_TYPE],
+            entry_type(entry),
         )
         if conf_file is None:
             _LOGGER.error(
                 NOT_FOUND,
-                entry.data[CONF_TYPE],
+                entry_type(entry),
             )
             return False
 
@@ -1005,12 +1010,12 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
         device_id = get_device_unique_id(entry)
         conf_file = await hass.async_add_executor_job(
             get_config,
-            entry.data[CONF_TYPE],
+            entry_type(entry),
         )
         if conf_file is None:
             _LOGGER.error(
                 NOT_FOUND,
-                entry.data[CONF_TYPE],
+                entry_type(entry),
             )
             return False
 
@@ -1065,12 +1070,12 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
         device_id = get_device_unique_id(entry)
         conf_file = await hass.async_add_executor_job(
             get_config,
-            entry.data[CONF_TYPE],
+            entry_type(entry),
         )
         if conf_file is None:
             _LOGGER.error(
                 NOT_FOUND,
-                entry.data[CONF_TYPE],
+                entry_type(entry),
             )
             return False
 
@@ -1098,12 +1103,12 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
         device_id = get_device_unique_id(entry)
         conf_file = await hass.async_add_executor_job(
             get_config,
-            entry.data[CONF_TYPE],
+            entry_type(entry),
         )
         if conf_file is None:
             _LOGGER.error(
                 NOT_FOUND,
-                entry.data[CONF_TYPE],
+                entry_type(entry),
             )
             return False
 
@@ -1163,7 +1168,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
     device_conf = await hass.async_add_executor_job(
         get_config,
-        entry.data[CONF_TYPE],
+        entry_type(entry),
     )
     if device_conf is None:
         _LOGGER.error(NOT_FOUND, config[CONF_TYPE])

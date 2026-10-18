@@ -2060,3 +2060,22 @@ async def test_options_flow_rejects_a_type_that_does_not_fit(
     assert result["type"] == "form"
     assert result["errors"] == {"base": "type_not_matching"}
     assert "type" not in config_entry.options
+
+
+@pytest.mark.asyncio
+async def test_options_type_wins_over_data(hass, mocker):
+    """The entry's effective type must come from options, not data (#24)."""
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    from custom_components.tuya_local import entry_type
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=13,
+        unique_id="u",
+        data={"type": "ard100_valve"},
+        options={"type": "zigbee_mini_switch"},
+    )
+    entry.add_to_hass(hass)
+
+    assert entry_type(entry) == "zigbee_mini_switch"

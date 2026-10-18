@@ -918,3 +918,35 @@ the type guard from #30 allows switching to it.
 
 Tests: `tests/test_device_config.py` - the exact datapoint set and a device that only
 reports dp 1.
+
+## 32. The type in options now wins, and setting a value is not undone by polls (2026.10.0.32)
+
+**Problem 1 - changing the device type did nothing.** The options flow (patch #24)
+stores the new type in `entry.options`, but `__init__.py` read
+`entry.data[CONF_TYPE]` in 43 places, so the entry kept building its entities from
+the original type. Saving `zigbee_mini_switch` on a Zigbee valve left `valve.*` only.
+
+**Patch:** `entry_type(entry)` returns `{**entry.data, **entry.options}.get(CONF_TYPE)`
+and every direct read now goes through it.
+
+**Problem 2 - a switch flipped on, off, on by itself.** Entities read the cached
+state, and setting a value only *sent* it: the cache kept the old value. A Zigbee
+device answers through its hub, measured **13 s** between sending `{1: true}` and the
+hub reporting it back, so every poll in between carried the old value and the entity
+flipped back and forth.
+
+**Patch:**
+
+- `device.anticipate_property_value(dp, value, seconds)` records the expected value
+  and holds it until the device reports it or the window expires;
+- `device._merge_poll()` drops a polled value that contradicts an anticipated one
+  (the stale echo) and stops anticipating as soon as the device catches up;
+- `TuyaDpsConfig.async_set_value()` anticipates every dp it is about to send, so all
+  platforms are covered (switch, light, valve, cover, number, select);
+- the window is **25 s for sub devices** (hub round trip) and **6 s for WiFi**.
+
+Measured after the fix: `turn_on` -> 0 state changes in 20 s, `turn_off` -> 1
+(the correct one), `turn_on` -> 0. Before: two wrong changes every time.
+
+Tests: `tests/test_device.py` (+3: stale echo ignored, catch-up accepted, window
+expires) and `tests/test_config_flow.py` (+1: options type wins over data).
