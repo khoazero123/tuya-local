@@ -1020,3 +1020,28 @@ def test_writing_target_range(mocker):
     mock_device = mocker.MagicMock()
     cfg = TuyaDpsConfig(mock_entity, mock_config)
     assert cfg.get_values_to_set(mock_device, 100) == {"1": 16}
+
+
+def test_zigbee_mini_switch_fits_the_reported_datapoints():
+    from custom_components.tuya_local.helpers.device_config import TuyaDeviceConfig
+
+    cfg = TuyaDeviceConfig("zigbee_mini_switch.yaml")
+    dps = {"1": False, "7": 0, "14": "memory", "19": "AAAA"}
+
+    assert cfg.config_type == "zigbee_mini_switch"
+    assert [(e.entity, [dp.id for dp in e.dps()]) for e in cfg.all_entities()] == [
+        ("switch", ["1"]),
+        ("time", ["7"]),
+        ("select", ["14"]),
+    ]
+    # dp 19 is unknown/optional noise: it must not stop the template from fitting.
+    assert cfg.matches(dps, None)
+    assert cfg.match_quality(dps, None) > 0
+
+
+def test_zigbee_mini_switch_tolerates_a_device_with_only_dp1():
+    from custom_components.tuya_local.helpers.device_config import TuyaDeviceConfig
+
+    cfg = TuyaDeviceConfig("zigbee_mini_switch.yaml")
+
+    assert cfg.matches({"1": True}, None)

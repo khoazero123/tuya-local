@@ -895,3 +895,26 @@ from the device's own matches.
 
 Tests: `tests/test_config_flow.py` - a mismatching type is refused and nothing is
 stored.
+
+## 31. A template for the Zigbee 1 gang mini switch (2026.10.0.31)
+
+**Problem:** a Zigbee 1 gang switch module behind a hub reports
+`{1: bool, 7: countdown, 14: power-on state, 19: unknown string}` and no bundled
+template describes it. `ard100_valve` worked (it maps dp 1/7/14) but exposes
+`valve.*` entities, and `simple_switch` (dp 1 only) left everything unavailable.
+
+**Patch - `devices/zigbee_mini_switch.yaml`:**
+
+- `switch` on dp 1;
+- `time` (timer, config category) on dp 7, **optional** - 0…86400;
+- `select` (initial state / power-on behaviour) on dp 14, **optional**, mapping
+  `off` / `on` / `memory`;
+- no product id is hard-coded except Nous L3 (same dps); dp 19 is deliberately not
+  mapped - it is an undocumented string, and leaving it out keeps the template
+  matching devices that do not report it.
+
+`match_quality` = 75 on that datapoint set (3 of 4 dps) and `matches()` is true, so
+the type guard from #30 allows switching to it.
+
+Tests: `tests/test_device_config.py` - the exact datapoint set and a device that only
+reports dp 1.

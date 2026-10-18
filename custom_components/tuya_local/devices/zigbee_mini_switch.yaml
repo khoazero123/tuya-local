@@ -1,0 +1,40 @@
+name: Zigbee mini switch
+products:
+  # Zigbee 1 gang switch module behind a hub: reports {1: bool, 7: countdown,
+  # 14: power-on state, 19: unknown string}.  Only dp 1 is required, so the same
+  # template also fits siblings that drop the timer or the initial state.
+  - id: key5ckdnys3pqgec
+    manufacturer: Nous
+    model: L3
+entities:
+  - entity: switch
+    dps:
+      - id: 1
+        name: switch
+        type: boolean
+  - entity: time
+    category: config
+    translation_key: timer
+    dps:
+      - id: 7
+        name: second
+        type: integer
+        optional: true
+        range:
+          min: 0
+          max: 86400
+  - entity: select
+    translation_key: initial_state
+    category: config
+    dps:
+      - id: 14
+        type: string
+        name: option
+        optional: true
+        mapping:
+          - dps_val: "off"
+            value: "off"
+          - dps_val: "on"
+            value: "on"
+          - dps_val: memory
+            value: memory
