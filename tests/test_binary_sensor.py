@@ -40,12 +40,14 @@ async def test_init_entry(hass):
         type(hass.data[DOMAIN]["dummy"]["binary_sensor_tank_full"])
         is TuyaLocalBinarySensor
     )
-    m_add_entities.assert_called_once()
+    # fork: the second call adds the "Connected" diagnostic binary sensor
+    # (PATCHES.md #22).
+    assert m_add_entities.call_count == 2
 
 
 @pytest.mark.asyncio
 async def test_init_entry_fails_if_device_has_no_binary_sensor(hass):
-    """Test initialisation when device has no matching entity"""
+    """A device without binary sensor dps still gets the diagnostics."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={
@@ -60,12 +62,10 @@ async def test_init_entry_fails_if_device_has_no_binary_sensor(hass):
     hass.data[DOMAIN] = {
         "dummy": {"device": m_device},
     }
-    try:
-        await async_setup_entry(hass, entry, m_add_entities)
-        assert False
-    except ValueError:
-        pass
-    m_add_entities.assert_not_called()
+    await async_setup_entry(hass, entry, m_add_entities)
+    assert m_add_entities.call_count == 1
+    added = m_add_entities.call_args[0][0]
+    assert [type(e).__name__ for e in added] == ["TuyaLocalConnectedBinarySensor"]
 
 
 @pytest.mark.asyncio

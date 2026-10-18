@@ -652,3 +652,41 @@ address.
   merge this device with another integration's device declaring the same MAC.
 
 Tests: `tests/test_lan_sensors.py` (new, 4) plus updated `tests/test_sensor.py`.
+
+## 22. Group A diagnostics: link state, timing, protocol, errors (2026.10.0.22)
+
+**Request:** more per device information than IP and MAC.
+
+**Patch - `device.py`** (tracking, all cheap and local):
+
+- `_last_response_ms`: duration of the last successful poll, measured around the
+  executor call;
+- `_last_error`: `{code, message, at}` of the last failure reported by the device
+  (the codes were only logged before, e.g. 901/914), cleared on the next success;
+- properties `last_error`, `last_seen` (`updated_at` of the cached state),
+  `response_time_ms`, `protocol_version` (the negotiated tinytuya version),
+  `dp_count`, `parent_id` / `node_id` (from `<parent>/<node>` unique ids).
+
+**Patch - new entities, one set per device, all `EntityCategory.DIAGNOSTIC`:**
+
+| Entity | Source |
+|---|---|
+| `sensor.<device>_last_seen` | when data was last received (timestamp) |
+| `sensor.<device>_response_time` | ms of the last poll |
+| `sensor.<device>_protocol_version` | 3.1 / 3.3 / 3.4 actually in use |
+| `sensor.<device>_datapoints` | how many dps the device reports |
+| `sensor.<device>_last_error` | last error code, message + time as attributes |
+| `sensor.<device>_parent_hub` | parent id for Zigbee children, node id attribute |
+| `sensor.<device>_config_type` | the device config file in use |
+| `binary_sensor.<device>_connected` | whether the LAN link is alive |
+
+`__init__.py` now also always forwards `"binary_sensor"`; both platforms skip their
+normal setup when the device has no matching dps and still raise when the device
+config is missing.
+
+**Not added, on purpose:** local_key / full device id (sensitive), MAC as a device
+connection (would merge devices across integrations), Wi-Fi RSSI (the Tuya LAN
+protocol does not report it).
+
+Tests: `tests/test_lan_sensors.py` (+6), `tests/test_sensor.py`,
+`tests/test_binary_sensor.py`.

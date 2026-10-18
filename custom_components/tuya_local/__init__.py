@@ -1165,9 +1165,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     entities = set()
     for e in device_conf.all_entities():
         entities.add(e.entity)
-    # Always forward the sensor platform: it also carries the LAN IP and MAC
-    # diagnostic sensors, which every device has (PATCHES.md #21).
+    # Always forward these platforms: they also carry the diagnostics that every
+    # device has (PATCHES.md #21, #22).
     entities.add("sensor")
+    entities.add("binary_sensor")
 
     await hass.config_entries.async_forward_entry_setups(entry, entities)
     await async_setup_services(hass, entities)

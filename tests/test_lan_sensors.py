@@ -96,3 +96,112 @@ async def test_mac_sensor_is_empty_when_nothing_is_known(hass, monkeypatch):
 
     await sensor.async_update()
     assert sensor.native_value is None
+
+
+# --- group A diagnostics (PATCHES.md #22) ---------------------------------
+
+
+def _dev(**kwargs):
+    device = _device()
+    for key, value in kwargs.items():
+        setattr(device, key, value)
+    return device
+
+
+async def test_last_seen_sensor_shows_a_timestamp(hass):
+    from datetime import UTC, datetime
+
+    entry = _entry(hass)
+    device = _dev(last_seen=1_760_000_000.0)
+    sensor = sensor_module.TuyaLocalLastSeenSensor(device, entry.entry_id, "dev123")
+    sensor.hass = hass
+
+    await sensor.async_update()
+    assert sensor.native_value == datetime.fromtimestamp(1_760_000_000.0, UTC)
+    assert sensor.unique_id == "dev123_last_seen"
+
+
+async def test_response_time_sensor(hass):
+    entry = _entry(hass)
+    sensor = sensor_module.TuyaLocalResponseTimeSensor(
+        _dev(response_time_ms=12.345), entry.entry_id, "dev123"
+    )
+    sensor.hass = hass
+
+    await sensor.async_update()
+    assert sensor.native_value == 12.3
+    assert sensor.native_unit_of_measurement == "ms"
+
+
+async def test_protocol_and_datapoint_sensors(hass):
+    entry = _entry(hass)
+    device = _dev(protocol_version="3.3", dp_count=7)
+
+    proto = sensor_module.TuyaLocalProtocolVersionSensor(
+        device, entry.entry_id, "dev123"
+    )
+    count = sensor_module.TuyaLocalDatapointCountSensor(
+        device, entry.entry_id, "dev123"
+    )
+    for sensor in (proto, count):
+        sensor.hass = hass
+        await sensor.async_update()
+
+    assert proto.native_value == "3.3"
+    assert count.native_value == 7
+
+
+async def test_last_error_sensor_reports_none_and_errors(hass):
+    entry = _entry(hass)
+    device = _dev(last_error=None)
+    sensor = sensor_module.TuyaLocalLastErrorSensor(device, entry.entry_id, "dev123")
+    sensor.hass = hass
+
+    await sensor.async_update()
+    assert sensor.native_value == "none"
+
+    device.last_error = {
+        "code": "914",
+        "message": "Check device config",
+        "at": 1_760_000_000.0,
+    }
+    await sensor.async_update()
+    assert sensor.native_value == "914"
+    assert sensor.extra_state_attributes["message"] == "Check device config"
+
+
+async def test_parent_hub_and_config_type_sensors(hass):
+    entry = _entry(hass)
+    device = _dev(parent_id="hub123", node_id="node456")
+
+    parent = sensor_module.TuyaLocalParentHubSensor(device, entry.entry_id, "dev123")
+    kind = sensor_module.TuyaLocalConfigTypeSensor(
+        device, entry.entry_id, "dev123", "zitech_ztbox"
+    )
+    for sensor in (parent, kind):
+        sensor.hass = hass
+        await sensor.async_update()
+
+    assert parent.native_value == "hub123"
+    assert parent.extra_state_attributes["node_id"] == "node456"
+    assert kind.native_value == "zitech_ztbox"
+
+
+async def test_connected_binary_sensor(hass):
+    from custom_components.tuya_local.binary_sensor import (
+        TuyaLocalConnectedBinarySensor,
+    )
+
+    entry = _entry(hass)
+    device = _dev(has_returned_state=True)
+    sensor = TuyaLocalConnectedBinarySensor(device, entry.entry_id, "dev123")
+    sensor.hass = hass
+
+    assert sensor.is_on is True
+    assert sensor.unique_id == "dev123_connected"
+
+    device.has_returned_state = False
+    assert sensor.is_on is False
+
+    device.has_returned_state = True
+    assert sensor.is_on is True

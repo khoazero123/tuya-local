@@ -5,7 +5,7 @@ API for Tuya Local devices.
 import asyncio
 import logging
 from asyncio.exceptions import CancelledError
-from time import time
+from time import monotonic, time
 
 import tinytuya
 from homeassistant.const import (
@@ -147,6 +147,9 @@ class TuyaLocalDevice(object):
         self._reset_cached_state()
 
         self._hass = hass
+        # Diagnostics for the extra sensors (PATCHES.md #22).
+        self._last_error = None
+        self._last_response_ms = None
 
         # API calls to update Tuya devices are asynchronous and non-blocking.
         # This means you can send a change and immediately request an updated
@@ -189,6 +192,49 @@ class TuyaLocalDevice(object):
         if self._model:
             info["model"] = self._model
         return info
+
+    @property
+    def last_error(self) -> dict | None:
+        """Return the last error the device reported, if any."""
+        return self._last_error
+
+    @property
+    def last_seen(self) -> float | None:
+        """Return when data was last received from the device."""
+        return self._cached_state.get("updated_at") or None
+
+    @property
+    def response_time_ms(self) -> float | None:
+        """Return how long the last successful poll took."""
+        return self._last_response_ms
+
+    @property
+    def protocol_version(self) -> str | None:
+        """Return the protocol version currently used to talk to the device."""
+        version = getattr(self._api, "version", None)
+        if version is None:
+            return None
+        try:
+            return f"{float(version):.1f}"
+        except TypeError, ValueError:
+            return str(version)
+
+    @property
+    def dp_count(self) -> int:
+        """Return how many datapoints the device currently reports."""
+        return len([key for key in self._cached_state if str(key).isdigit()])
+
+    @property
+    def parent_id(self) -> str | None:
+        """Return the parent device id of a sub device (Zigbee children)."""
+        parts = str(self.unique_id).split("/")
+        return parts[0] if len(parts) > 1 else None
+
+    @property
+    def node_id(self) -> str | None:
+        """Return the sub device's node id inside its parent."""
+        parts = str(self.unique_id).split("/")
+        return parts[1] if len(parts) > 1 else None
 
     @property
     def has_returned_state(self):
@@ -689,7 +735,9 @@ class TuyaLocalDevice(object):
             try:
                 if not self._hass.is_stopping:
                     async with self._api_lock:
+                        started = monotonic()
                         retval = await self._hass.async_add_executor_job(func)
+                        self._last_response_ms = (monotonic() - started) * 1000
                     if isinstance(retval, dict) and "Error" in retval:
                         last_err_code = retval.get("Err")
                         last_err_msg = retval.get("Error")
@@ -704,6 +752,7 @@ class TuyaLocalDevice(object):
                             raise AttributeError(retval["Error"])
                     self._api_protocol_working = True
                     self._api_working_protocol_failures = 0
+                    self._last_error = None
                     return retval
             except Exception as e:
                 _LOGGER.debug(
@@ -728,6 +777,11 @@ class TuyaLocalDevice(object):
                         self._api_protocol_working = False
                         for entity in self._children:
                             entity.async_schedule_update_ha_state()
+                    self._last_error = {
+                        "code": last_err_code,
+                        "message": last_err_msg,
+                        "at": time(),
+                    }
                     if last_err_code:
                         log_format = "%s Device reported error %s: %s%s"
                         log_args = (
