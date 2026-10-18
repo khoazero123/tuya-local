@@ -66,6 +66,16 @@ async def async_get_names(hass: HomeAssistant) -> dict[str, str]:
     return names
 
 
+async def async_save_names(hass: HomeAssistant, names: dict[str, str]) -> None:
+    """Store a name map that was fetched elsewhere (one cloud call, many uses)."""
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    domain_data[NAMES_CACHE] = names
+    try:
+        await _store(hass).async_save(names)
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("Could not save Tuya device names: %s", err)
+
+
 async def async_refresh_names(hass: HomeAssistant) -> dict[str, str] | None:
     """Fetch device names from the Tuya cloud, when a login is available."""
     from .cloud import Cloud

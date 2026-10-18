@@ -4,13 +4,17 @@ Setup for different kinds of Tuya numbers
 
 import logging
 
-from homeassistant.components.number import NumberEntity
+from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.components.number.const import (
     DEFAULT_MAX_VALUE,
     DEFAULT_MIN_VALUE,
     NumberDeviceClass,
 )
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
+from homeassistant.helpers.entity import EntityCategory
 
+from . import cloud_refresh
+from .const import CONF_SERVICE_ENTRY, DOMAIN
 from .device import TuyaLocalDevice
 from .entity import TuyaLocalEntity, unit_from_ascii
 from .helpers.config import async_tuya_setup_platform
@@ -21,7 +25,22 @@ _LOGGER = logging.getLogger(__name__)
 MODE_AUTO = "auto"
 
 
+SERVICE_DEVICE_INFO = DeviceInfo(
+    identifiers={(DOMAIN, "hub")},
+    name="Tuya Local",
+    manufacturer="tuya-local",
+    model="Integration services",
+    entry_type=DeviceEntryType.SERVICE,
+)
+
+
 async def async_setup_entry(hass, config_entry, async_add_entities):
+    # The service entry owns the integration wide controls (PATCHES.md #20, #23).
+    if config_entry.data.get(CONF_SERVICE_ENTRY):
+        interval = await cloud_refresh.async_get_interval(hass)
+        async_add_entities([TuyaLocalCloudRefreshInterval(interval)])
+        return
+
     config = {**config_entry.data, **config_entry.options}
     await async_tuya_setup_platform(
         hass,
@@ -30,6 +49,35 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
         "number",
         TuyaLocalNumber,
     )
+
+
+class TuyaLocalCloudRefreshInterval(NumberEntity):
+    """How often the cloud device list is refreshed in the background.
+
+    The per device cloud diagnostics read a cached list, so this interval is the
+    only thing that decides how often the cloud is asked. 0 turns the refresh off.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Cloud refresh interval"
+    _attr_unique_id = "tuya_local_cloud_refresh_interval"
+    _attr_icon = "mdi:timer-sync-outline"
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_device_info = SERVICE_DEVICE_INFO
+    _attr_native_min_value = cloud_refresh.MIN_INTERVAL_MINUTES
+    _attr_native_max_value = cloud_refresh.MAX_INTERVAL_MINUTES
+    _attr_native_step = 5
+    _attr_native_unit_of_measurement = "min"
+    _attr_mode = NumberMode.BOX
+
+    def __init__(self, interval: int):
+        self._attr_native_value = interval
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Store the interval and restart the background refresh."""
+        stored = await cloud_refresh.async_set_interval(self.hass, int(value))
+        self._attr_native_value = stored
+        self.async_write_ha_state()
 
 
 class TuyaLocalNumber(TuyaLocalEntity, NumberEntity):

@@ -205,3 +205,136 @@ async def test_connected_binary_sensor(hass):
 
     device.has_returned_state = True
     assert sensor.is_on is True
+
+
+# --- device id / local key / group B (PATCHES.md #23) ----------------------
+
+
+async def test_device_id_and_local_key_sensors(hass):
+    entry = _entry(hass)
+    config = {CONF_DEVICE_ID: "dev123", "local_key": "abc123key"}
+
+    dev_id = sensor_module.TuyaLocalDeviceIdSensor(
+        _device(), entry.entry_id, "dev123", config
+    )
+    key = sensor_module.TuyaLocalLocalKeySensor(
+        _device(), entry.entry_id, "dev123", config
+    )
+    for sensor in (dev_id, key):
+        sensor.hass = hass
+        await sensor.async_update()
+
+    assert dev_id.native_value == "dev123"
+    assert key.native_value is None  # entry holds no local key in this fixture
+
+
+async def test_cloud_sensors_read_the_cache_only(hass, monkeypatch):
+    from custom_components.tuya_local import bulk_add
+
+    entry = _entry(hass)
+    monkeypatch.setattr(
+        bulk_add,
+        "_cloud_cache",
+        {
+            "at": 1,
+            "devices": {
+                "dev123": {
+                    "product_id": "pk123",
+                    "category": "cz",
+                    "name": "Đèn bếp (app)",
+                    "online": True,
+                }
+            },
+        },
+    )
+
+    product = sensor_module.TuyaLocalProductIdSensor(
+        _device(), entry.entry_id, "dev123", "dev123", None
+    )
+    category = sensor_module.TuyaLocalCategorySensor(
+        _device(), entry.entry_id, "dev123", "dev123", None
+    )
+    cloud_name = sensor_module.TuyaLocalCloudNameSensor(
+        _device(), entry.entry_id, "dev123", "dev123", None
+    )
+    for sensor in (product, category, cloud_name):
+        sensor.hass = hass
+        await sensor.async_update()
+
+    assert product.native_value == "pk123"
+    assert category.native_value == "cz"
+    assert cloud_name.native_value == "Đèn bếp (app)"
+
+
+async def test_find_cached_device_matches_sub_devices(monkeypatch):
+    from custom_components.tuya_local import bulk_add
+
+    monkeypatch.setattr(
+        bulk_add,
+        "_cloud_cache",
+        {
+            "at": 1,
+            "devices": {
+                "hub1": {"name": "hub"},
+                "hub1/node9": {"name": "child"},
+            },
+        },
+    )
+    assert bulk_add.find_cached_device("hub1")["name"] == "hub"
+    assert bulk_add.find_cached_device("hub1", "node9")["name"] == "child"
+    # sub device without a cid still resolves to a child record, not the hub
+    assert bulk_add.find_cached_device("hub1", None)["name"] == "hub"
+    assert bulk_add.find_cached_device("missing") is None
+
+
+async def test_cloud_online_binary_sensor(hass, monkeypatch):
+    from custom_components.tuya_local import bulk_add
+    from custom_components.tuya_local.binary_sensor import (
+        TuyaLocalCloudOnlineBinarySensor,
+    )
+
+    entry = _entry(hass)
+    sensor = TuyaLocalCloudOnlineBinarySensor(
+        _device(), entry.entry_id, "dev123", "dev123", None
+    )
+    sensor.hass = hass
+
+    monkeypatch.setattr(bulk_add, "_cloud_cache", {})
+    assert sensor.is_on is None
+
+    monkeypatch.setattr(
+        bulk_add, "_cloud_cache", {"at": 1, "devices": {"dev123": {"online": False}}}
+    )
+    assert sensor.is_on is False
+
+
+async def test_cloud_refresh_interval_is_stored_and_can_be_disabled(hass):
+    from custom_components.tuya_local import cloud_refresh
+
+    assert await cloud_refresh.async_get_interval(hass) == 15
+
+    assert await cloud_refresh.async_set_interval(hass, 30) == 30
+    assert await cloud_refresh.async_get_interval(hass) == 30
+
+    # clamped
+    assert await cloud_refresh.async_set_interval(hass, 99999) == 1440
+    assert await cloud_refresh.async_set_interval(hass, 0) == 0
+    # 0 disables the background task
+    assert hass.data[DOMAIN].get(cloud_refresh.REFRESH_TASK) is None
+
+
+async def test_the_interval_number_entity(hass):
+    from custom_components.tuya_local.number import TuyaLocalCloudRefreshInterval
+
+    number = TuyaLocalCloudRefreshInterval(15)
+    number.hass = hass
+    number.async_write_ha_state = lambda: None
+
+    assert number.native_value == 15
+    assert number.native_min_value == 0
+    assert number.native_max_value == 1440
+    assert number.native_unit_of_measurement == "min"
+    assert number.unique_id == "tuya_local_cloud_refresh_interval"
+
+    await number.async_set_native_value(45)
+    assert number.native_value == 45

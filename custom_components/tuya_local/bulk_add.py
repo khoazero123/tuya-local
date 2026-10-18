@@ -123,6 +123,35 @@ async def async_cached_devices(
         return devices
 
 
+def peek_cached_devices() -> dict[str, Any]:
+    """Return the cached account device list without fetching anything.
+
+    Used by the per device cloud diagnostics so they never trigger a cloud call:
+    the list is refreshed in the background (see ``cloud_refresh``).
+    """
+    return _cloud_cache.get("devices") or {}
+
+
+def find_cached_device(device_id: str | None, cid: str | None = None) -> dict | None:
+    """Return the cached cloud record for a configured device, if there is one."""
+    if not device_id:
+        return None
+    devices = peek_cached_devices()
+    if not devices:
+        return None
+    # A sub device is identified by "<hub id>/<node id>", so the cid wins over the
+    # bare hub record.
+    if cid and f"{device_id}/{cid}" in devices:
+        return devices[f"{device_id}/{cid}"]
+    if device_id in devices:
+        return devices[device_id]
+    for key, value in devices.items():
+        parent = key.split("/")[0]
+        if parent == device_id and "/" in key:
+            return value
+    return None
+
+
 async def async_warm_cloud(hass: HomeAssistant) -> None:
     """Fetch the account's device list in the background, once, at start-up."""
     try:

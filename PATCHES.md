@@ -690,3 +690,47 @@ protocol does not report it).
 
 Tests: `tests/test_lan_sensors.py` (+6), `tests/test_sensor.py`,
 `tests/test_binary_sensor.py`.
+
+## 23. Device id, local key, cloud details, and a scheduled cloud refresh (2026.10.0.23)
+
+**Request:** also show the device id and local key, plus group B (cloud details),
+with the cloud part optimised: reuse the cached list and fetch it in the background
+every 15 minutes, configurable from an entity.
+
+**New per device diagnostics:**
+
+| Entity | Source |
+|---|---|
+| `sensor.<device>_device_id` | the Tuya device id from the config entry |
+| `sensor.<device>_local_key` | the local key from the config entry (**sensitive**) |
+| `sensor.<device>_product_id` | cached cloud list |
+| `sensor.<device>_category` | cached cloud list |
+| `sensor.<device>_cloud_name` | name set in the Tuya/SmartLife app |
+| `binary_sensor.<device>_cloud_online` | `online` flag from the cloud list |
+
+**Cloud part is cache only.** The entity path never calls the cloud: group B reads
+the account device list that `bulk_add.async_cached_devices()` already keeps (one
+fetch, 5 minute TTL, shared with the add-all flow). `bulk_add.peek_cached_devices()`
+/ `find_cached_device(device_id, cid)` expose it read-only, and a sub device is
+matched by `<hub id>/<node id>` so its own record wins over the hub's.
+
+**New module `cloud_refresh.py`:**
+
+- a background task refreshes the list on an interval, and the same payload also
+  fills the device name cache, so one cloud call serves both;
+- the interval is persisted in its own store (default **15** minutes, `0` disables
+  the task, clamped to 0…1440);
+- started from the first device entry, stopped when the last one is unloaded;
+- failures are logged and never kill the task.
+
+**New entity on the service entry device:** `number.tuya_local_cloud_refresh_interval`
+("Cloud refresh interval", `mdi:timer-sync-outline`, unit `min`, step 5, config
+category). `__init__` now forwards the `number` platform for the service entry as
+well as `button`.
+
+**Security note:** `local_key` is a credential. It is shown because it was asked for;
+the state also lands in the recorder database, so disable that entity (or exclude the
+domain from the recorder) if history should not keep it.
+
+Tests: `tests/test_lan_sensors.py` (+6), `tests/test_sensor.py`,
+`tests/test_binary_sensor.py`.

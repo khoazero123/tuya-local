@@ -10,7 +10,7 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.helpers.entity import EntityCategory
 
-from .const import CONF_TYPE, DOMAIN
+from .const import CONF_DEVICE_CID, CONF_TYPE, DOMAIN
 from .device import TuyaLocalDevice
 from .entity import TuyaLocalEntity
 from .helpers.config import async_tuya_setup_platform, get_device_id
@@ -39,7 +39,16 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
     # Every device also reports whether the local link is alive (PATCHES.md #22).
     async_add_entities(
-        [TuyaLocalConnectedBinarySensor(device, config_entry.entry_id, device_id)]
+        [
+            TuyaLocalConnectedBinarySensor(device, config_entry.entry_id, device_id),
+            TuyaLocalCloudOnlineBinarySensor(
+                device,
+                config_entry.entry_id,
+                device_id,
+                device_id,
+                config.get(CONF_DEVICE_CID),
+            ),
+        ]
     )
 
 
@@ -105,3 +114,45 @@ class TuyaLocalBinarySensor(TuyaLocalEntity, BinarySensorEntity):
     def is_on(self):
         """Return true if the binary sensor is on."""
         return self._sensor_dps.get_value(self._device)
+
+
+class TuyaLocalCloudOnlineBinarySensor(BinarySensorEntity):
+    """Whether the Tuya cloud reports the device as online.
+
+    Read from the cached account device list, so this never calls the cloud.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_has_entity_name = True
+    _attr_should_poll = True
+
+    def __init__(
+        self,
+        device: TuyaLocalDevice,
+        entry_id: str,
+        device_id: str,
+        cloud_device_id: str | None,
+        cid: str | None,
+    ):
+        self._device = device
+        self._entry_id = entry_id
+        self._device_id = device_id
+        self._cloud_device_id = cloud_device_id
+        self._cid = cid
+        self._attr_unique_id = f"{device.unique_id}_cloud_online"
+        self._attr_name = "Cloud online"
+
+    @property
+    def device_info(self):
+        """Return the device's information."""
+        return self._device.device_info
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return the cached cloud online state, or None when it is not known."""
+        from .bulk_add import find_cached_device
+
+        record = find_cached_device(self._cloud_device_id, self._cid)
+        if not record:
+            return None
+        return bool(record.get("online"))

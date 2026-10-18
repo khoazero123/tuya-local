@@ -72,6 +72,11 @@ async def test_init_entry_fails_if_device_has_no_sensor(hass):
         "TuyaLocalLastErrorSensor",
         "TuyaLocalParentHubSensor",
         "TuyaLocalConfigTypeSensor",
+        "TuyaLocalDeviceIdSensor",
+        "TuyaLocalLocalKeySensor",
+        "TuyaLocalProductIdSensor",
+        "TuyaLocalCategorySensor",
+        "TuyaLocalCloudNameSensor",
     ]
 
 

@@ -1127,11 +1127,18 @@ async def async_migrate_entry(hass, entry: ConfigEntry):
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     if is_service_entry(entry):
-        # Only the integration level buttons; no device connection.
-        await hass.config_entries.async_forward_entry_setups(entry, ["button"])
+        # Only the integration level controls; no device connection.
+        await hass.config_entries.async_forward_entry_setups(
+            entry, ["button", "number"]
+        )
         return True
 
     await async_ensure_service_entry(hass)
+    # Keep the cloud device list fresh in the background; the cloud diagnostics
+    # read it from the cache (PATCHES.md #23).
+    from .cloud_refresh import async_start_cloud_refresh
+
+    await async_start_cloud_refresh(hass)
     device_id = get_device_id(entry.data)
     _LOGGER.debug(
         "Setting up entry for device: %s",
@@ -1185,7 +1192,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     if is_service_entry(entry):
-        return await hass.config_entries.async_forward_entry_unload(entry, "button")
+        unloaded = await hass.config_entries.async_forward_entry_unload(entry, "button")
+        unloaded = (
+            await hass.config_entries.async_forward_entry_unload(entry, "number")
+            and unloaded
+        )
+        return unloaded
 
     device_id = get_device_id(entry.data)
     _LOGGER.debug("Unloading entry for device: %s", device_id)
@@ -1223,6 +1235,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     ]
     if not remaining:
         async_stop_discovery(hass)
+        from .cloud_refresh import async_stop_cloud_refresh
+
+        await async_stop_cloud_refresh(hass)
 
     return True
 

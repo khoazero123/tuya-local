@@ -14,7 +14,13 @@ from homeassistant.const import CONF_HOST
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_TYPE, DOMAIN
+from .const import (
+    CONF_DEVICE_CID,
+    CONF_DEVICE_ID,
+    CONF_LOCAL_KEY,
+    CONF_TYPE,
+    DOMAIN,
+)
 from .device import TuyaLocalDevice
 from .entity import TuyaLocalEntity, unit_from_ascii
 from .helpers.config import async_tuya_setup_platform, get_device_id
@@ -57,6 +63,29 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
             TuyaLocalParentHubSensor(device, config_entry.entry_id, device_id),
             TuyaLocalConfigTypeSensor(
                 device, config_entry.entry_id, device_id, config.get(CONF_TYPE)
+            ),
+            TuyaLocalDeviceIdSensor(device, config_entry.entry_id, device_id, config),
+            TuyaLocalLocalKeySensor(device, config_entry.entry_id, device_id, config),
+            TuyaLocalProductIdSensor(
+                device,
+                config_entry.entry_id,
+                device_id,
+                device_id,
+                config.get(CONF_DEVICE_CID),
+            ),
+            TuyaLocalCategorySensor(
+                device,
+                config_entry.entry_id,
+                device_id,
+                device_id,
+                config.get(CONF_DEVICE_CID),
+            ),
+            TuyaLocalCloudNameSensor(
+                device,
+                config_entry.entry_id,
+                device_id,
+                device_id,
+                config.get(CONF_DEVICE_CID),
             ),
         ]
     )
@@ -324,3 +353,135 @@ class TuyaLocalConfigTypeSensor(TuyaLocalDeviceInfoSensor):
     async def async_update(self):
         """Read the configured device type."""
         self._attr_native_value = self._config_type
+
+
+class TuyaLocalEntryInfoSensor(TuyaLocalDeviceInfoSensor):
+    """Base for sensors reading a value straight out of the config entry."""
+
+    def __init__(self, device, entry_id: str, device_id: str, config: dict, suffix):
+        super().__init__(device, entry_id, device_id, suffix, "")
+
+    def entry_data(self) -> dict:
+        """Return the entry data merged with its options."""
+        entry = self.hass.config_entries.async_get_entry(self._entry_id)
+        if entry is None:
+            return {}
+        return {**entry.data, **entry.options}
+
+
+class TuyaLocalDeviceIdSensor(TuyaLocalEntryInfoSensor):
+    """The Tuya device id this entry is configured for."""
+
+    _attr_icon = "mdi:fingerprint"
+
+    def __init__(self, device, entry_id: str, device_id: str, config: dict):
+        super().__init__(device, entry_id, device_id, config, "device_id")
+        self._attr_name = "Device ID"
+
+    async def async_update(self):
+        """Read the id from the config entry."""
+        self._attr_native_value = self.entry_data().get(CONF_DEVICE_ID)
+
+
+class TuyaLocalLocalKeySensor(TuyaLocalEntryInfoSensor):
+    """The local key used to control the device (sensitive)."""
+
+    _attr_icon = "mdi:key-variant"
+
+    def __init__(self, device, entry_id: str, device_id: str, config: dict):
+        super().__init__(device, entry_id, device_id, config, "local_key")
+        self._attr_name = "Local key"
+
+    async def async_update(self):
+        """Read the key from the config entry."""
+        self._attr_native_value = self.entry_data().get(CONF_LOCAL_KEY)
+
+
+class TuyaLocalCloudInfoSensor(TuyaLocalDeviceInfoSensor):
+    """Base for sensors reading the cached Tuya cloud device list."""
+
+    def __init__(
+        self,
+        device,
+        entry_id: str,
+        device_id: str,
+        cloud_device_id: str | None,
+        cid: str | None,
+        suffix: str,
+        name: str,
+    ):
+        super().__init__(device, entry_id, device_id, suffix, name)
+        self._cloud_device_id = cloud_device_id
+        self._cid = cid
+
+    def cloud_record(self) -> dict | None:
+        """Return the cached cloud record for this device, if there is one."""
+        from .bulk_add import find_cached_device
+
+        return find_cached_device(self._cloud_device_id, self._cid)
+
+
+class TuyaLocalProductIdSensor(TuyaLocalCloudInfoSensor):
+    """The Tuya product id (product key) of the device."""
+
+    _attr_icon = "mdi:shape-outline"
+
+    def __init__(self, device, entry_id, device_id, cloud_device_id, cid):
+        super().__init__(
+            device,
+            entry_id,
+            device_id,
+            cloud_device_id,
+            cid,
+            "product_id",
+            "Product ID",
+        )
+
+    async def async_update(self):
+        """Read the product id from the cached cloud list."""
+        record = self.cloud_record() or {}
+        self._attr_native_value = record.get("product_id")
+
+
+class TuyaLocalCategorySensor(TuyaLocalCloudInfoSensor):
+    """The Tuya category of the device."""
+
+    _attr_icon = "mdi:tag-outline"
+
+    def __init__(self, device, entry_id, device_id, cloud_device_id, cid):
+        super().__init__(
+            device,
+            entry_id,
+            device_id,
+            cloud_device_id,
+            cid,
+            "category",
+            "Category",
+        )
+
+    async def async_update(self):
+        """Read the category from the cached cloud list."""
+        record = self.cloud_record() or {}
+        self._attr_native_value = record.get("category")
+
+
+class TuyaLocalCloudNameSensor(TuyaLocalCloudInfoSensor):
+    """The name the device has in the Tuya/SmartLife app."""
+
+    _attr_icon = "mdi:cloud-outline"
+
+    def __init__(self, device, entry_id, device_id, cloud_device_id, cid):
+        super().__init__(
+            device,
+            entry_id,
+            device_id,
+            cloud_device_id,
+            cid,
+            "cloud_name",
+            "Cloud name",
+        )
+
+    async def async_update(self):
+        """Read the name from the cached cloud list."""
+        record = self.cloud_record() or {}
+        self._attr_native_value = record.get("name")
