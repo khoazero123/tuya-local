@@ -1997,3 +1997,66 @@ async def test_options_flow_aborts_for_the_service_entry(hass, bypass_setup):
 
     assert result["type"] == "abort"
     assert result["reason"] == "service_entry"
+
+
+@pytest.mark.asyncio
+async def test_options_flow_rejects_a_type_that_does_not_fit(
+    hass, bypass_setup, mocker
+):
+    """A template whose required dps are missing must not be saved (PATCHES #30)."""
+    from custom_components.tuya_local.helpers.config import get_device_id
+
+    mocker.patch(
+        "custom_components.tuya_local.config_flow.async_test_connection",
+        return_value=mocker.MagicMock(),
+    )
+
+    data = {
+        CONF_DEVICE_ID: "hubid",
+        CONF_DEVICE_CID: "nodeid",
+        CONF_HOST: "hostname",
+        CONF_LOCAL_KEY: TESTKEY,
+        CONF_NAME: "sub",
+        CONF_POLL_ONLY: False,
+        CONF_PROTOCOL_VERSION: "auto",
+        CONF_TYPE: "ard100_valve",
+    }
+    config_entry = MockConfigEntry(
+        domain=DOMAIN, version=13, unique_id="uniqueid", data=data
+    )
+    config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    def _candidate(config_type):
+        candidate = mocker.MagicMock()
+        candidate.config_type = config_type
+        candidate.match_quality.return_value = 90
+        candidate.product_display_entries.return_value = [("ZemiSmart", "Valve")]
+        return candidate
+
+    device = mocker.MagicMock()
+    # no dp 1: simple_switch (which only maps dp 1) cannot drive this device
+    device._get_cached_state.return_value = {101: 1, 102: 2}
+    device._product_ids = ["pk"]
+    device.async_stop = mocker.AsyncMock()
+    device.async_possible_types = mocker.AsyncMock(
+        return_value=[_candidate("ard100_valve"), _candidate("simple_switch")]
+    )
+    hass.data.setdefault(DOMAIN, {})[get_device_id(data)] = {"device": device}
+
+    form = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        user_input={
+            CONF_TYPE: "simple_switch",  # needs dp 1 only, but scores 0 here
+            CONF_HOST: "hostname",
+            CONF_LOCAL_KEY: TESTKEY,
+            CONF_POLL_ONLY: False,
+            CONF_PROTOCOL_VERSION: "auto",
+        },
+    )
+
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "type_not_matching"}
+    assert "type" not in config_entry.options

@@ -870,3 +870,28 @@ with a translation explaining that the entry only owns the integration level con
 
 Tests: `tests/test_config_flow.py` - the service entry returns an abort instead of an
 error.
+
+## 30. A type that cannot drive the device is rejected (2026.10.0.30)
+
+**Problem:** changing the type only tested the connection. A template can connect fine
+and still have no datapoint in common with the device, so every entity it creates
+points at a dp that does not exist and goes **unavailable** - exactly what happened
+when a Zigbee valve was switched to `simple_switch` (which only maps dp 1).
+
+**Patch - `config_flow` options flow:**
+
+- before saving a *changed* type, `_async_type_fits_device()` scores it with
+  `TuyaDeviceConfig.match_quality()` against the running device's cached dps and
+  product ids; `match_quality` returns 0 when a required dp is missing, which is the
+  gate;
+- a score of 0 rejects the save with the `type_not_matching` error and the previous
+  type stays in place (nothing is written to the options);
+- scoring errors (or no running device to compare against) do not block the save -
+  the connection test still runs;
+- the new type is logged when it is refused, with the device name.
+
+**Note:** this only guards *changing* the type; the initial add flow already picks
+from the device's own matches.
+
+Tests: `tests/test_config_flow.py` - a mismatching type is refused and nothing is
+stored.

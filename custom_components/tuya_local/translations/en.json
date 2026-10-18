@@ -110,7 +110,8 @@
       }
     },
     "error": {
-      "connection": "Unable to connect to your device with those details. It could be an intermittent issue, or they may be incorrect. If you selected a specific protocol version, try 'auto' instead."
+      "connection": "Unable to connect to your device with those details. It could be an intermittent issue, or they may be incorrect. If you selected a specific protocol version, try 'auto' instead.",
+      "type_not_matching": "That template does not match this device's datapoints, so its entities would all be unavailable. Pick one from the list that fits (the current type is kept)."
     },
     "abort": {
       "not_supported": "Sorry, there is no support for this device.",

@@ -790,8 +790,47 @@ class OptionsFlowHandler(OptionsFlow):
             return self.async_abort(reason="service_entry")
         return await self.async_step_user(user_input)
 
+    async def _async_type_fits_device(self, config_type: str, config: dict) -> bool:
+        """Whether ``config_type`` actually matches the device's own datapoints.
+
+        Changing the type is destructive: entities of the new template point at dps
+        the device may not have, and they all go unavailable (a Zigbee valve switched
+        to ``simple_switch`` is the case that prompted this).  ``match_quality``
+        returns 0 when a required dp is missing, so that is the gate.
+        """
+        device = (
+            (self.hass.data.get(DOMAIN) or {})
+            .get(get_device_id(config), {})
+            .get("device")
+        )
+        if device is None:
+            return True  # nothing to check against; the connection test still runs
+        cfg = await self.hass.async_add_executor_job(get_config, config_type)
+        if cfg is None:
+            return False
+        try:
+            quality = cfg.match_quality(
+                device._get_cached_state(), getattr(device, "_product_ids", None)
+            )
+        except Exception as err:  # noqa: BLE001 - never block on a scoring error
+            _LOGGER.debug("Could not score %s: %s", config_type, err)
+            return True
+        if quality:
+            return True
+        _LOGGER.warning(
+            "%s does not match the datapoints of %s; keeping the current type",
+            config_type,
+            config.get(CONF_NAME) or config.get(CONF_DEVICE_ID),
+        )
+        return False
+
     async def _async_save_options(self, user_input: dict):
         """Validate with the device, then store the options."""
+        config = {**self.config_entry.data, **self.config_entry.options, **user_input}
+        new_type = user_input.get(CONF_TYPE)
+        if new_type and new_type != self.config_entry.data.get(CONF_TYPE):
+            if not await self._async_type_fits_device(new_type, config):
+                return None, "type_not_matching"
         proto = user_input.get(CONF_PROTOCOL_VERSION)
         if proto != "auto":
             user_input[CONF_PROTOCOL_VERSION] = float(proto)
@@ -801,11 +840,10 @@ class OptionsFlowHandler(OptionsFlow):
             user_input.pop(CONF_IR2MQTT_BRIDGE, None)
         else:
             user_input[CONF_IR2MQTT_BRIDGE] = str(bridge).strip()
-        config = {**self.config_entry.data, **self.config_entry.options, **user_input}
         device = await async_test_connection(config, self.hass)
         if device is None:
-            return None
-        return self.async_create_entry(title="", data=user_input)
+            return None, "connection"
+        return self.async_create_entry(title="", data=user_input), None
 
     async def _async_type_options(self, config):
         """Templates that actually fit this device, best match first.
@@ -884,10 +922,10 @@ class OptionsFlowHandler(OptionsFlow):
 
         if user_input is not None:
             user_input.pop("type_search", None)
-            saved = await self._async_save_options(user_input)
+            saved, error = await self._async_save_options(user_input)
             if saved is not None:
                 return saved
-            errors["base"] = "connection"
+            errors["base"] = error
 
         # IR2MQTT bridge: select thay vì input — gồm "(tắt)", gợi ý theo tên
         # thiết bị, id đang dùng, và id của các entry tuya_local khác.
