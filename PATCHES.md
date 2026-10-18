@@ -819,3 +819,26 @@ search results - never ~1700 entries.
 
 Tests: `tests/test_config_flow.py` - the search filters and then saves, and the
 no-match case.
+
+## 27. Type list: only the templates that fit the device (2026.10.0.27)
+
+**Request:** drop the search box; just list the templates that suit the device, like
+the add-device flow does.
+
+**Patch - `config_flow` options flow:**
+
+- `type_search` field, `_type_search` / `_type_results` state and `_async_all_types`
+  are gone; the form is the plain Configure form again;
+- the type list is built the same way the add flow builds it:
+  `device.async_possible_types()` (the running device's dps + product ids, scored by
+  `match_quality`, 20 s timeout) gives the candidates, labelled
+  `"<manufacturer> <model> (<config>)"` and sorted best match first;
+- the type in use is always first, labelled "(đang dùng)";
+- if the device does not answer, it falls back to the product-id index in
+  `bulk_add` (no connection needed), and an empty list keeps the current type so the
+  form is never impossible to submit;
+- `translations/en.json`: the search field label, the `{search_hint}` placeholder and
+  the `no_matches` error are removed.
+
+Tests: `tests/test_config_flow.py` - the list holds the current type plus the
+device's candidates, and the form has no `type_search` field.

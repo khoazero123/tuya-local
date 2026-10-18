@@ -779,14 +779,9 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
 # Sentinel shown in the options "Device type" list: browsing ~1700 templates in a
 # dropdown is unusable, so the list only shows the ones matching the product id and
 # this entry opens a search step (PATCHES.md #25).
-TYPE_RESULT_LIMIT = 150
-
-
 class OptionsFlowHandler(OptionsFlow):
     def __init__(self):
         """Initialize options flow."""
-        self._type_results: list[str] = []
-        self._type_search = ""
 
     async def async_step_init(self, user_input=None):
         return await self.async_step_user(user_input)
@@ -808,49 +803,67 @@ class OptionsFlowHandler(OptionsFlow):
             return None
         return self.async_create_entry(title="", data=user_input)
 
-    async def _async_all_types(self, search: str) -> list[str]:
-        """Every template, A-Z, optionally filtered by a substring."""
-        from .helpers.device_config import available_configs
-
-        def _list() -> list[str]:
-            names = sorted({name.removesuffix(".yaml") for name in available_configs()})
-            if not search:
-                return names
-            return [name for name in names if search in name.lower()]
-
-        names = await self.hass.async_add_executor_job(_list)
-        return names[:TYPE_RESULT_LIMIT]
-
     async def _async_type_options(self, config):
-        """Device types to choose from, the ones listing this product first."""
-        from .bulk_add import async_types_for_products, find_cached_device
+        """Templates that actually fit this device, best match first.
 
+        Same source as the add flow (``device.async_possible_types()``): the
+        running device's dps plus its product ids, scored by match quality.  No
+        searching, no full template list - just the candidates that fit.
+        """
         current = config.get(CONF_TYPE)
-        record = (
-            find_cached_device(config.get(CONF_DEVICE_ID), config.get(CONF_DEVICE_CID))
-            or {}
-        )
-        product_id = record.get("product_id")
-        matched: list[str] = []
-        if product_id:
-            index = await async_types_for_products(self.hass, [product_id])
-            matched = index.get(product_id, [])
+        device_id = config.get(CONF_DEVICE_ID)
+        options: list[SelectOptionDict] = []
 
-        # The list holds the templates that declare this product id, plus whatever
-        # the search box found, so it never becomes a 1700 item dropdown.
-        ordered = sorted(set(matched) | set(self._type_results))
-        if current and current not in ordered:
-            ordered.insert(0, current)
+        device = (self.hass.data.get(DOMAIN) or {}).get(device_id, {}).get("device")
+        candidates: list[tuple[str, str, int]] = []
+        if device is not None:
+            try:
+                possible = await asyncio.wait_for(device.async_possible_types(), 20)
+            except Exception as err:  # noqa: BLE001 - offline device, fall back
+                _LOGGER.debug("Could not list possible types: %s", err)
+                possible = []
+            cached_state = device._get_cached_state()
+            product_ids = getattr(device, "_product_ids", None)
+            for dev_type in possible:
+                try:
+                    quality = dev_type.match_quality(cached_state, product_ids)
+                    entries = dev_type.product_display_entries(product_ids)
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.debug("Skipping %s: %s", dev_type.config_type, err)
+                    continue
+                manufacturer, model = entries[0] if entries else (None, None)
+                parts = [p for p in (manufacturer, model) if p]
+                label = " ".join(parts) or dev_type.name
+                candidates.append(
+                    (dev_type.config_type, f"{label} ({dev_type.config_type})", quality)
+                )
 
-        options = []
-        for value in ordered:
-            if value == current:
-                label = f"{value} (đang dùng)"
-            elif value in matched:
-                label = f"{value} (khớp product id)"
-            else:
-                label = value
+        if not candidates:
+            # The device is not answering: fall back to the product-id index, which
+            # needs no connection.
+            from .bulk_add import async_types_for_products, find_cached_device
+
+            record = find_cached_device(device_id, config.get(CONF_DEVICE_CID)) or {}
+            product_id = record.get("product_id")
+            if product_id:
+                index = await async_types_for_products(self.hass, [product_id])
+                for value in index.get(product_id, []):
+                    candidates.append((value, f"{value} (khớp product id)", 0))
+
+        candidates.sort(key=lambda item: item[2], reverse=True)
+        seen: set[str] = set()
+        if current:
+            seen.add(current)
+            options.append(
+                SelectOptionDict(value=current, label=f"{current} (đang dùng)")
+            )
+        for value, label, _quality in candidates:
+            if value in seen:
+                continue
+            seen.add(value)
             options.append(SelectOptionDict(value=value, label=label))
+        if not options:
+            options.append(SelectOptionDict(value=current or "", label=current or ""))
         return options
 
     async def async_step_user(self, user_input=None):
@@ -858,31 +871,12 @@ class OptionsFlowHandler(OptionsFlow):
         errors = {}
         config = {**self.config_entry.data, **self.config_entry.options}
 
-        search_hint = ""
         if user_input is not None:
-            search = str(user_input.pop("type_search", "") or "").strip()
-            if search:
-                # Filter the type list and show the form again with what was filled
-                # in so far, instead of jumping to a separate step (a dropdown
-                # selection alone never submits, which is confusing).
-                self._type_search = search
-                self._type_results = await self._async_all_types(search)
-                if self._type_results:
-                    search_hint = (
-                        f"🔍 {len(self._type_results)} template khớp '{search}'."
-                    )
-                else:
-                    self._type_search = ""
-                    self._type_results = []
-                    errors["base"] = "no_matches"
-                config = {**config, **user_input}
-            else:
-                self._type_search = ""
-                self._type_results = []
-                saved = await self._async_save_options(user_input)
-                if saved is not None:
-                    return saved
-                errors["base"] = "connection"
+            user_input.pop("type_search", None)
+            saved = await self._async_save_options(user_input)
+            if saved is not None:
+                return saved
+            errors["base"] = "connection"
 
         # IR2MQTT bridge: select thay vì input — gồm "(tắt)", gợi ý theo tên
         # thiết bị, id đang dùng, và id của các entry tuya_local khác.
@@ -925,7 +919,6 @@ class OptionsFlowHandler(OptionsFlow):
                     mode=SelectSelectorMode.DROPDOWN,
                 )
             ),
-            vol.Optional("type_search", default=""): str,
             vol.Required(
                 CONF_LOCAL_KEY,
                 default=config.get(CONF_LOCAL_KEY, ""),
@@ -958,10 +951,7 @@ class OptionsFlowHandler(OptionsFlow):
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(schema),
-            description_placeholders={
-                "device_details_url": DEVICE_DETAILS_URL,
-                "search_hint": search_hint,
-            },
+            description_placeholders={"device_details_url": DEVICE_DETAILS_URL},
             errors=errors,
         )
 

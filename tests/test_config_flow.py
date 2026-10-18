@@ -1866,8 +1866,10 @@ async def test_options_flow_keeps_the_current_type(hass, bypass_setup, mocker):
 
 
 @pytest.mark.asyncio
-async def test_options_flow_type_search_filters_the_list(hass, bypass_setup, mocker):
-    """Typing in the search box re-renders the form with the filtered list."""
+@pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_options_flow_lists_only_templates_that_fit(hass, bypass_setup, mocker):
+    """The type list holds the device's own candidates, no search field."""
     mocker.patch(
         "custom_components.tuya_local.config_flow.async_test_connection",
         return_value=mocker.MagicMock(),
@@ -1891,78 +1893,35 @@ async def test_options_flow_type_search_filters_the_list(hass, bypass_setup, moc
     config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(config_entry.entry_id)
     await hass.async_block_till_done()
+
+    # a running device object would be used when present; the entry setup in tests
+    # does not create one, so the product-id fallback applies
+    from custom_components.tuya_local import bulk_add
+
+    hass.data.setdefault(DOMAIN, {})["deviceid"] = {"device": None}
+    mocker.patch.object(
+        bulk_add,
+        "_cloud_cache",
+        {
+            "at": 1,
+            "devices": {"deviceid": {"product_id": "pk1", "name": "x", "online": True}},
+        },
+    )
+    mocker.patch.object(
+        bulk_add,
+        "_type_index",
+        return_value={"pk1": ["type_b", "type_a"]},
+    )
 
     form = await hass.config_entries.options.async_init(config_entry.entry_id)
     assert form["type"] == "form"
-
-    filtered = await hass.config_entries.options.async_configure(
-        form["flow_id"],
-        user_input={
-            CONF_TYPE: "ble_pt216_temp_humidity",
-            "type_search": "ztbox",
-            CONF_HOST: "hostname",
-            CONF_LOCAL_KEY: TESTKEY,
-            CONF_POLL_ONLY: False,
-            CONF_PROTOCOL_VERSION: "auto",
-        },
-    )
-
-    assert filtered["type"] == "form"
-    assert not config_entry.options  # nothing saved yet
-    values = _type_values(filtered)
-    assert "zitech_ztbox" in values
-
-    result = await hass.config_entries.options.async_configure(
-        filtered["flow_id"],
-        user_input={
-            CONF_TYPE: "zitech_ztbox",
-            "type_search": "",
-            CONF_HOST: "hostname",
-            CONF_LOCAL_KEY: TESTKEY,
-            CONF_POLL_ONLY: False,
-            CONF_PROTOCOL_VERSION: "auto",
-        },
-    )
-    assert result["type"] == "create_entry"
-    assert config_entry.options[CONF_TYPE] == "zitech_ztbox"
+    values = _type_values(form)
+    assert values[0] == "ble_pt216_temp_humidity"  # current, first
+    assert set(values) == {"ble_pt216_temp_humidity", "type_a", "type_b"}
+    assert "type_search" not in _field_names(form)
 
 
-@pytest.mark.asyncio
-async def test_options_flow_type_search_reports_no_matches(hass, bypass_setup, mocker):
-    mocker.patch(
-        "custom_components.tuya_local.config_flow.async_test_connection",
-        return_value=mocker.MagicMock(),
-    )
-    config_entry = MockConfigEntry(
-        domain=DOMAIN,
-        version=13,
-        unique_id="uniqueid",
-        data={
-            CONF_DEVICE_ID: "deviceid",
-            CONF_HOST: "hostname",
-            CONF_LOCAL_KEY: TESTKEY,
-            CONF_NAME: "test",
-            CONF_POLL_ONLY: False,
-            CONF_PROTOCOL_VERSION: "auto",
-            CONF_TYPE: "ble_pt216_temp_humidity",
-            CONF_DEVICE_CID: "",
-        },
-    )
-    config_entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(config_entry.entry_id)
-    await hass.async_block_till_done()
-
-    form = await hass.config_entries.options.async_init(config_entry.entry_id)
-    again = await hass.config_entries.options.async_configure(
-        form["flow_id"],
-        user_input={
-            CONF_TYPE: "ble_pt216_temp_humidity",
-            "type_search": "zzz_no_such_template",
-            CONF_HOST: "hostname",
-            CONF_LOCAL_KEY: TESTKEY,
-            CONF_POLL_ONLY: False,
-            CONF_PROTOCOL_VERSION: "auto",
-        },
-    )
-    assert again["type"] == "form"
-    assert again["errors"] == {"base": "no_matches"}
+def _field_names(form) -> list[str]:
+    schema = form.get("data_schema")
+    mapping = getattr(schema, "schema", None) or {}
+    return [getattr(marker, "schema", None) for marker in mapping]
