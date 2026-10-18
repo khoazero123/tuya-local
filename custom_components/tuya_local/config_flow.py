@@ -779,14 +779,12 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
 # Sentinel shown in the options "Device type" list: browsing ~1700 templates in a
 # dropdown is unusable, so the list only shows the ones matching the product id and
 # this entry opens a search step (PATCHES.md #25).
-TYPE_SEARCH_SENTINEL = "__search_type__"
 TYPE_RESULT_LIMIT = 150
 
 
 class OptionsFlowHandler(OptionsFlow):
     def __init__(self):
         """Initialize options flow."""
-        self._pending_options: dict | None = None
         self._type_results: list[str] = []
         self._type_search = ""
 
@@ -809,70 +807,6 @@ class OptionsFlowHandler(OptionsFlow):
         if device is None:
             return None
         return self.async_create_entry(title="", data=user_input)
-
-    async def async_step_type_search(self, user_input=None):
-        """Search the full template list, A-Z."""
-        errors = {}
-        if user_input is not None:
-            search = str(user_input.get("search") or "").strip().lower()
-            results = await self._async_all_types(search)
-            if not results:
-                errors["base"] = "no_matches"
-            else:
-                self._type_search = search
-                self._type_results = results
-                return await self.async_step_type_choose()
-        everything = await self._async_all_types("")
-        return self.async_show_form(
-            step_id="type_search",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional("search", default=self._type_search): str,
-                }
-            ),
-            errors=errors,
-            description_placeholders={"count": str(len(everything))},
-        )
-
-    async def async_step_type_choose(self, user_input=None):
-        """Pick one of the search results."""
-        if user_input is not None:
-            pending = dict(self._pending_options or {})
-            pending[CONF_TYPE] = user_input[CONF_TYPE]
-            pending.pop("search", None)
-            saved = await self._async_save_options(pending)
-            if saved is not None:
-                return saved
-            # The chosen type did not connect: back to the list with an error.
-            return self.async_show_form(
-                step_id="type_choose",
-                data_schema=vol.Schema(
-                    {
-                        vol.Required(CONF_TYPE): SelectSelector(
-                            SelectSelectorConfig(
-                                options=self._type_results,
-                                mode=SelectSelectorMode.DROPDOWN,
-                            )
-                        )
-                    }
-                ),
-                errors={"base": "connection"},
-                description_placeholders={"count": str(len(self._type_results))},
-            )
-        return self.async_show_form(
-            step_id="type_choose",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_TYPE): SelectSelector(
-                        SelectSelectorConfig(
-                            options=self._type_results,
-                            mode=SelectSelectorMode.DROPDOWN,
-                        )
-                    )
-                }
-            ),
-            description_placeholders={"count": str(len(self._type_results))},
-        )
 
     async def _async_all_types(self, search: str) -> list[str]:
         """Every template, A-Z, optionally filtered by a substring."""
@@ -902,7 +836,9 @@ class OptionsFlowHandler(OptionsFlow):
             index = await async_types_for_products(self.hass, [product_id])
             matched = index.get(product_id, [])
 
-        ordered = sorted(matched)
+        # The list holds the templates that declare this product id, plus whatever
+        # the search box found, so it never becomes a 1700 item dropdown.
+        ordered = sorted(set(matched) | set(self._type_results))
         if current and current not in ordered:
             ordered.insert(0, current)
 
@@ -910,15 +846,11 @@ class OptionsFlowHandler(OptionsFlow):
         for value in ordered:
             if value == current:
                 label = f"{value} (đang dùng)"
-            else:
+            elif value in matched:
                 label = f"{value} (khớp product id)"
+            else:
+                label = value
             options.append(SelectOptionDict(value=value, label=label))
-        options.append(
-            SelectOptionDict(
-                value=TYPE_SEARCH_SENTINEL,
-                label="🔍 Tìm template khác (danh sách đầy đủ)",
-            )
-        )
         return options
 
     async def async_step_user(self, user_input=None):
@@ -926,15 +858,31 @@ class OptionsFlowHandler(OptionsFlow):
         errors = {}
         config = {**self.config_entry.data, **self.config_entry.options}
 
+        search_hint = ""
         if user_input is not None:
-            if user_input.get(CONF_TYPE) == TYPE_SEARCH_SENTINEL:
-                # Keep what was filled in, then go and find a template.
-                self._pending_options = dict(user_input)
-                return await self.async_step_type_search()
-            saved = await self._async_save_options(user_input)
-            if saved is not None:
-                return saved
-            errors["base"] = "connection"
+            search = str(user_input.pop("type_search", "") or "").strip()
+            if search:
+                # Filter the type list and show the form again with what was filled
+                # in so far, instead of jumping to a separate step (a dropdown
+                # selection alone never submits, which is confusing).
+                self._type_search = search
+                self._type_results = await self._async_all_types(search)
+                if self._type_results:
+                    search_hint = (
+                        f"🔍 {len(self._type_results)} template khớp '{search}'."
+                    )
+                else:
+                    self._type_search = ""
+                    self._type_results = []
+                    errors["base"] = "no_matches"
+                config = {**config, **user_input}
+            else:
+                self._type_search = ""
+                self._type_results = []
+                saved = await self._async_save_options(user_input)
+                if saved is not None:
+                    return saved
+                errors["base"] = "connection"
 
         # IR2MQTT bridge: select thay vì input — gồm "(tắt)", gợi ý theo tên
         # thiết bị, id đang dùng, và id của các entry tuya_local khác.
@@ -977,6 +925,7 @@ class OptionsFlowHandler(OptionsFlow):
                     mode=SelectSelectorMode.DROPDOWN,
                 )
             ),
+            vol.Optional("type_search", default=""): str,
             vol.Required(
                 CONF_LOCAL_KEY,
                 default=config.get(CONF_LOCAL_KEY, ""),
@@ -1009,7 +958,10 @@ class OptionsFlowHandler(OptionsFlow):
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema(schema),
-            description_placeholders={"device_details_url": DEVICE_DETAILS_URL},
+            description_placeholders={
+                "device_details_url": DEVICE_DETAILS_URL,
+                "search_hint": search_hint,
+            },
             errors=errors,
         )
 

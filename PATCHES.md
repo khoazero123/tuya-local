@@ -794,3 +794,28 @@ type" dropdown, which is unusable to browse.
 
 Tests: `tests/test_config_flow.py` - the search flow end to end, the "no matches"
 case, and the main form keeping the current type.
+
+## 26. Type search: a text box in the form, not a dropdown trick (2026.10.0.26)
+
+**Problem:** #25 added a "🔍 Tìm template khác" entry to the type dropdown and jumped
+to a search step when it was picked. Picking a dropdown value does not submit the
+form in Home Assistant, so choosing it looked like nothing happened - the request
+never even reached the backend (nothing in the log).
+
+**Patch - `config_flow` options flow:** the extra steps are gone; the search is a
+normal field on the Configure form:
+
+- `type_search` (optional text field, label "🔍 Find another template (type part of
+  a name, then press Submit to filter the list above)");
+- submitting with something typed filters the full template list (A–Z, 150 max),
+  keeps everything else the user filled in, and shows the form again with the
+  filtered templates added to the **Device type** dropdown; the description says how
+  many matched;
+- an empty search saves the options as before ("nothing to do" is a plain Submit);
+- no match shows the `no_matches` error and keeps the previous list.
+
+The dropdown therefore only ever holds the product-id matches plus the current
+search results - never ~1700 entries.
+
+Tests: `tests/test_config_flow.py` - the search filters and then saves, and the
+no-match case.

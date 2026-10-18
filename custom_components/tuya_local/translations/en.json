@@ -98,28 +98,15 @@
     "step": {
       "user": {
         "title": "Configure your Tuya Local device",
-        "description": "[Follow these instructions to find your local key.]({device_details_url})",
+        "description": "[Follow these instructions to find your local key.]({device_details_url}) {search_hint}",
         "data": {
           "host": "IP address or hostname",
           "local_key": "Local key",
           "protocol_version": "Protocol version (try auto if not known)",
           "poll_only": "Poll only (try this if your device does not work fully)",
           "type": "Device type",
-          "ir2mqtt_bridge": "IR2MQTT bridge device id (optional)"
-        }
-      },
-      "type_search": {
-        "title": "Find a device type",
-        "description": "Search the {count} bundled device templates. Type part of a name or brand to narrow the list, results are shown A to Z.",
-        "data": {
-          "search": "Search"
-        }
-      },
-      "type_choose": {
-        "title": "Choose a device type",
-        "description": "Showing {count} matching templates, A to Z. Pick the one that fits this device.",
-        "data": {
-          "type": "Device type"
+          "ir2mqtt_bridge": "IR2MQTT bridge device id (optional)",
+          "type_search": "\ud83d\udd0d Find another template (type part of a name, then press Submit to filter the list above)"
         }
       }
     },
