@@ -1803,8 +1803,8 @@ async def test_flow_integration_discovery_aborts_if_configured(hass):
 
 
 @pytest.mark.asyncio
-async def test_options_flow_changes_the_device_type(hass, bypass_setup, mocker):
-    """The type picked at add time can be changed afterwards (PATCHES.md #24)."""
+async def test_options_flow_keeps_the_current_type(hass, bypass_setup, mocker):
+    """The main form offers the current type (and the search shortcut) only."""
     mocker.patch(
         "custom_components.tuya_local.config_flow.async_test_connection",
         return_value=mocker.MagicMock(),
@@ -1836,7 +1836,7 @@ async def test_options_flow_changes_the_device_type(hass, bypass_setup, mocker):
     result = await hass.config_entries.options.async_configure(
         form["flow_id"],
         user_input={
-            CONF_TYPE: "kogan_kahtp_heater",
+            CONF_TYPE: "ble_pt216_temp_humidity",
             CONF_HOST: "hostname",
             CONF_LOCAL_KEY: TESTKEY,
             CONF_POLL_ONLY: False,
@@ -1845,9 +1845,107 @@ async def test_options_flow_changes_the_device_type(hass, bypass_setup, mocker):
     )
 
     assert result["type"] == "create_entry"
-    assert config_entry.options[CONF_TYPE] == "kogan_kahtp_heater"
-    # data keeps the original, options win when the entry is set up
-    assert config_entry.data[CONF_TYPE] == "ble_pt216_temp_humidity"
-    assert {**config_entry.data, **config_entry.options}[CONF_TYPE] == (
-        "kogan_kahtp_heater"
+    assert config_entry.options[CONF_TYPE] == "ble_pt216_temp_humidity"
+
+
+@pytest.mark.asyncio
+async def test_options_flow_type_search_flow(hass, bypass_setup, mocker):
+    """Search step: sentinel -> search -> pick, instead of ~1700 dropdown items."""
+    mocker.patch(
+        "custom_components.tuya_local.config_flow.async_test_connection",
+        return_value=mocker.MagicMock(),
     )
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=13,
+        unique_id="uniqueid",
+        data={
+            CONF_DEVICE_ID: "deviceid",
+            CONF_HOST: "hostname",
+            CONF_LOCAL_KEY: TESTKEY,
+            CONF_NAME: "test",
+            CONF_POLL_ONLY: False,
+            CONF_PROTOCOL_VERSION: "auto",
+            CONF_TYPE: "ble_pt216_temp_humidity",
+            CONF_DEVICE_CID: "",
+        },
+    )
+    config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    from custom_components.tuya_local.config_flow import TYPE_SEARCH_SENTINEL
+
+    form = await hass.config_entries.options.async_init(config_entry.entry_id)
+    assert form["type"] == "form"
+
+    search_form = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        user_input={
+            CONF_TYPE: TYPE_SEARCH_SENTINEL,
+            CONF_HOST: "hostname",
+            CONF_LOCAL_KEY: TESTKEY,
+            CONF_POLL_ONLY: False,
+            CONF_PROTOCOL_VERSION: "auto",
+        },
+    )
+    assert search_form["type"] == "form"
+    assert search_form["step_id"] == "type_search"
+
+    choose_form = await hass.config_entries.options.async_configure(
+        search_form["flow_id"], user_input={"search": "ztbox"}
+    )
+    assert choose_form["type"] == "form"
+    assert choose_form["step_id"] == "type_choose"
+
+    result = await hass.config_entries.options.async_configure(
+        choose_form["flow_id"], user_input={CONF_TYPE: "zitech_ztbox"}
+    )
+    assert result["type"] == "create_entry"
+    assert config_entry.options[CONF_TYPE] == "zitech_ztbox"
+
+
+@pytest.mark.asyncio
+async def test_options_flow_type_search_reports_no_matches(hass, bypass_setup, mocker):
+    mocker.patch(
+        "custom_components.tuya_local.config_flow.async_test_connection",
+        return_value=mocker.MagicMock(),
+    )
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=13,
+        unique_id="uniqueid",
+        data={
+            CONF_DEVICE_ID: "deviceid",
+            CONF_HOST: "hostname",
+            CONF_LOCAL_KEY: TESTKEY,
+            CONF_NAME: "test",
+            CONF_POLL_ONLY: False,
+            CONF_PROTOCOL_VERSION: "auto",
+            CONF_TYPE: "ble_pt216_temp_humidity",
+            CONF_DEVICE_CID: "",
+        },
+    )
+    config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    from custom_components.tuya_local.config_flow import TYPE_SEARCH_SENTINEL
+
+    form = await hass.config_entries.options.async_init(config_entry.entry_id)
+    search_form = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        user_input={
+            CONF_TYPE: TYPE_SEARCH_SENTINEL,
+            CONF_HOST: "hostname",
+            CONF_LOCAL_KEY: TESTKEY,
+            CONF_POLL_ONLY: False,
+            CONF_PROTOCOL_VERSION: "auto",
+        },
+    )
+    again = await hass.config_entries.options.async_configure(
+        search_form["flow_id"], user_input={"search": "zzz_no_such_template"}
+    )
+    assert again["step_id"] == "type_search"
+    assert again["errors"] == {"base": "no_matches"}

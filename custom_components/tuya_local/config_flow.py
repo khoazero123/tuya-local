@@ -776,18 +776,120 @@ class ConfigFlowHandler(ConfigFlow, domain=DOMAIN):
         return OptionsFlowHandler()
 
 
+# Sentinel shown in the options "Device type" list: browsing ~1700 templates in a
+# dropdown is unusable, so the list only shows the ones matching the product id and
+# this entry opens a search step (PATCHES.md #25).
+TYPE_SEARCH_SENTINEL = "__search_type__"
+TYPE_RESULT_LIMIT = 150
+
+
 class OptionsFlowHandler(OptionsFlow):
     def __init__(self):
         """Initialize options flow."""
-        pass
+        self._pending_options: dict | None = None
+        self._type_results: list[str] = []
+        self._type_search = ""
 
     async def async_step_init(self, user_input=None):
         return await self.async_step_user(user_input)
 
+    async def _async_save_options(self, user_input: dict):
+        """Validate with the device, then store the options."""
+        proto = user_input.get(CONF_PROTOCOL_VERSION)
+        if proto != "auto":
+            user_input[CONF_PROTOCOL_VERSION] = float(proto)
+        # Chỉ lưu option khi có giá trị (tránh thêm key rỗng vào entry data)
+        bridge = user_input.get(CONF_IR2MQTT_BRIDGE)
+        if bridge in (None, "", IR2MQTT_BRIDGE_OFF):
+            user_input.pop(CONF_IR2MQTT_BRIDGE, None)
+        else:
+            user_input[CONF_IR2MQTT_BRIDGE] = str(bridge).strip()
+        config = {**self.config_entry.data, **self.config_entry.options, **user_input}
+        device = await async_test_connection(config, self.hass)
+        if device is None:
+            return None
+        return self.async_create_entry(title="", data=user_input)
+
+    async def async_step_type_search(self, user_input=None):
+        """Search the full template list, A-Z."""
+        errors = {}
+        if user_input is not None:
+            search = str(user_input.get("search") or "").strip().lower()
+            results = await self._async_all_types(search)
+            if not results:
+                errors["base"] = "no_matches"
+            else:
+                self._type_search = search
+                self._type_results = results
+                return await self.async_step_type_choose()
+        everything = await self._async_all_types("")
+        return self.async_show_form(
+            step_id="type_search",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional("search", default=self._type_search): str,
+                }
+            ),
+            errors=errors,
+            description_placeholders={"count": str(len(everything))},
+        )
+
+    async def async_step_type_choose(self, user_input=None):
+        """Pick one of the search results."""
+        if user_input is not None:
+            pending = dict(self._pending_options or {})
+            pending[CONF_TYPE] = user_input[CONF_TYPE]
+            pending.pop("search", None)
+            saved = await self._async_save_options(pending)
+            if saved is not None:
+                return saved
+            # The chosen type did not connect: back to the list with an error.
+            return self.async_show_form(
+                step_id="type_choose",
+                data_schema=vol.Schema(
+                    {
+                        vol.Required(CONF_TYPE): SelectSelector(
+                            SelectSelectorConfig(
+                                options=self._type_results,
+                                mode=SelectSelectorMode.DROPDOWN,
+                            )
+                        )
+                    }
+                ),
+                errors={"base": "connection"},
+                description_placeholders={"count": str(len(self._type_results))},
+            )
+        return self.async_show_form(
+            step_id="type_choose",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_TYPE): SelectSelector(
+                        SelectSelectorConfig(
+                            options=self._type_results,
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    )
+                }
+            ),
+            description_placeholders={"count": str(len(self._type_results))},
+        )
+
+    async def _async_all_types(self, search: str) -> list[str]:
+        """Every template, A-Z, optionally filtered by a substring."""
+        from .helpers.device_config import available_configs
+
+        def _list() -> list[str]:
+            names = sorted({name.removesuffix(".yaml") for name in available_configs()})
+            if not search:
+                return names
+            return [name for name in names if search in name.lower()]
+
+        names = await self.hass.async_add_executor_job(_list)
+        return names[:TYPE_RESULT_LIMIT]
+
     async def _async_type_options(self, config):
         """Device types to choose from, the ones listing this product first."""
         from .bulk_add import async_types_for_products, find_cached_device
-        from .helpers.device_config import available_configs
 
         current = config.get(CONF_TYPE)
         record = (
@@ -800,24 +902,23 @@ class OptionsFlowHandler(OptionsFlow):
             index = await async_types_for_products(self.hass, [product_id])
             matched = index.get(product_id, [])
 
-        everything = await self.hass.async_add_executor_job(
-            lambda: [name.removesuffix(".yaml") for name in available_configs()]
-        )
-        ordered = matched + [t for t in everything if t not in matched]
+        ordered = sorted(matched)
+        if current and current not in ordered:
+            ordered.insert(0, current)
 
         options = []
         for value in ordered:
             if value == current:
                 label = f"{value} (đang dùng)"
-            elif value in matched:
-                label = f"{value} (khớp product id)"
             else:
-                label = value
+                label = f"{value} (khớp product id)"
             options.append(SelectOptionDict(value=value, label=label))
-        if current and current not in ordered:
-            options.insert(
-                0, SelectOptionDict(value=current, label=f"{current} (đang dùng)")
+        options.append(
+            SelectOptionDict(
+                value=TYPE_SEARCH_SENTINEL,
+                label="🔍 Tìm template khác (danh sách đầy đủ)",
             )
+        )
         return options
 
     async def async_step_user(self, user_input=None):
@@ -826,21 +927,14 @@ class OptionsFlowHandler(OptionsFlow):
         config = {**self.config_entry.data, **self.config_entry.options}
 
         if user_input is not None:
-            proto = user_input.get(CONF_PROTOCOL_VERSION)
-            if proto != "auto":
-                user_input[CONF_PROTOCOL_VERSION] = float(proto)
-            # Chỉ lưu option khi có giá trị (tránh thêm key rỗng vào entry data)
-            bridge = user_input.get(CONF_IR2MQTT_BRIDGE)
-            if bridge in (None, "", IR2MQTT_BRIDGE_OFF):
-                user_input.pop(CONF_IR2MQTT_BRIDGE, None)
-            else:
-                user_input[CONF_IR2MQTT_BRIDGE] = str(bridge).strip()
-            config = {**config, **user_input}
-            device = await async_test_connection(config, self.hass)
-            if device:
-                return self.async_create_entry(title="", data=user_input)
-            else:
-                errors["base"] = "connection"
+            if user_input.get(CONF_TYPE) == TYPE_SEARCH_SENTINEL:
+                # Keep what was filled in, then go and find a template.
+                self._pending_options = dict(user_input)
+                return await self.async_step_type_search()
+            saved = await self._async_save_options(user_input)
+            if saved is not None:
+                return saved
+            errors["base"] = "connection"
 
         # IR2MQTT bridge: select thay vì input — gồm "(tắt)", gợi ý theo tên
         # thiết bị, id đang dùng, và id của các entry tuya_local khác.

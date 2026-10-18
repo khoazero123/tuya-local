@@ -769,3 +769,28 @@ new config does not have stay behind as unavailable and can be deleted.
 
 Tests: `tests/test_config_flow.py` (options flow now carries the type, plus a type
 change test), `tests/test_bulk_add_ha.py` (+2 plan tests).
+
+## 25. Find a device type: search instead of one huge dropdown (2026.10.0.25)
+
+**Problem:** patch #24 listed all ~1700 bundled templates in the options "Device
+type" dropdown, which is unusable to browse.
+
+**Patch - `config_flow` options flow:**
+
+- the main form's **Device type** list now only contains the templates that list
+  the device's product id (A–Z), the type currently in use, and a last entry
+  **"🔍 Tìm template khác (danh sách đầy đủ)"**;
+- picking that entry opens **step `type_search`**: a search box that filters the
+  full template list by substring (case insensitive) and sorts it A–Z, capped at
+  150 results with the total count in the description;
+- then **step `type_choose`** lists the matches A–Z; choosing one goes through the
+  same connection test as before, and a type that does not connect returns to that
+  list with the error instead of losing the flow;
+- "no template matches that search" is reported on the search step.
+
+**Patch - translations:** `options.step.user.data.type`, the new
+`options.step.type_search` / `type_choose` titles + field labels and
+`options.error.no_matches` in `en.json` (other languages fall back to English).
+
+Tests: `tests/test_config_flow.py` - the search flow end to end, the "no matches"
+case, and the main form keeping the current type.
