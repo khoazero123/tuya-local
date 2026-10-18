@@ -823,6 +823,7 @@ async def test_options_flow_modifies_config(hass, bypass_setup, mocker):
     result = await hass.config_entries.options.async_configure(
         form["flow_id"],
         user_input={
+            CONF_TYPE: "ble_pt216_temp_humidity",
             CONF_HOST: "new_hostname",
             CONF_LOCAL_KEY: "new_key",
             CONF_POLL_ONLY: False,
@@ -830,6 +831,8 @@ async def test_options_flow_modifies_config(hass, bypass_setup, mocker):
         },
     )
     expected = {
+        # fork: the device type is part of the options form now (PATCHES.md #24)
+        CONF_TYPE: "ble_pt216_temp_humidity",
         CONF_HOST: "new_hostname",
         CONF_LOCAL_KEY: "new_key",
         CONF_POLL_ONLY: False,
@@ -1797,3 +1800,54 @@ async def test_flow_integration_discovery_aborts_if_configured(hass):
     )
     assert result["type"] == "abort"
     assert result["reason"] == "already_configured"
+
+
+@pytest.mark.asyncio
+async def test_options_flow_changes_the_device_type(hass, bypass_setup, mocker):
+    """The type picked at add time can be changed afterwards (PATCHES.md #24)."""
+    mocker.patch(
+        "custom_components.tuya_local.config_flow.async_test_connection",
+        return_value=mocker.MagicMock(),
+    )
+
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=13,
+        unique_id="uniqueid",
+        data={
+            CONF_DEVICE_ID: "deviceid",
+            CONF_HOST: "hostname",
+            CONF_LOCAL_KEY: TESTKEY,
+            CONF_NAME: "test",
+            CONF_POLL_ONLY: False,
+            CONF_PROTOCOL_VERSION: "auto",
+            CONF_TYPE: "ble_pt216_temp_humidity",
+            CONF_DEVICE_CID: "subdeviceid",
+        },
+    )
+    config_entry.add_to_hass(hass)
+
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    form = await hass.config_entries.options.async_init(config_entry.entry_id)
+    assert form["type"] == "form"
+
+    result = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        user_input={
+            CONF_TYPE: "kogan_kahtp_heater",
+            CONF_HOST: "hostname",
+            CONF_LOCAL_KEY: TESTKEY,
+            CONF_POLL_ONLY: False,
+            CONF_PROTOCOL_VERSION: "auto",
+        },
+    )
+
+    assert result["type"] == "create_entry"
+    assert config_entry.options[CONF_TYPE] == "kogan_kahtp_heater"
+    # data keeps the original, options win when the entry is set up
+    assert config_entry.data[CONF_TYPE] == "ble_pt216_temp_humidity"
+    assert {**config_entry.data, **config_entry.options}[CONF_TYPE] == (
+        "kogan_kahtp_heater"
+    )

@@ -784,6 +784,42 @@ class OptionsFlowHandler(OptionsFlow):
     async def async_step_init(self, user_input=None):
         return await self.async_step_user(user_input)
 
+    async def _async_type_options(self, config):
+        """Device types to choose from, the ones listing this product first."""
+        from .bulk_add import async_types_for_products, find_cached_device
+        from .helpers.device_config import available_configs
+
+        current = config.get(CONF_TYPE)
+        record = (
+            find_cached_device(config.get(CONF_DEVICE_ID), config.get(CONF_DEVICE_CID))
+            or {}
+        )
+        product_id = record.get("product_id")
+        matched: list[str] = []
+        if product_id:
+            index = await async_types_for_products(self.hass, [product_id])
+            matched = index.get(product_id, [])
+
+        everything = await self.hass.async_add_executor_job(
+            lambda: [name.removesuffix(".yaml") for name in available_configs()]
+        )
+        ordered = matched + [t for t in everything if t not in matched]
+
+        options = []
+        for value in ordered:
+            if value == current:
+                label = f"{value} (đang dùng)"
+            elif value in matched:
+                label = f"{value} (khớp product id)"
+            else:
+                label = value
+            options.append(SelectOptionDict(value=value, label=label))
+        if current and current not in ordered:
+            options.insert(
+                0, SelectOptionDict(value=current, label=f"{current} (đang dùng)")
+            )
+        return options
+
     async def async_step_user(self, user_input=None):
         """Manage the options."""
         errors = {}
@@ -832,7 +868,21 @@ class OptionsFlowHandler(OptionsFlow):
                 label = f"{bid} (entry khác)"
             bridge_options.append(SelectOptionDict(value=bid, label=label))
 
+        # fork: the device type used to be fixed at add time (auto-add picks the
+        # first config listing the product id), so a wrong pick could only be
+        # fixed by removing and re-adding the device.  Let it be changed here.
+        current_type = config.get(CONF_TYPE)
+        type_options = await self._async_type_options(config)
         schema = {
+            vol.Required(
+                CONF_TYPE,
+                default=current_type,
+            ): SelectSelector(
+                SelectSelectorConfig(
+                    options=type_options,
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            ),
             vol.Required(
                 CONF_LOCAL_KEY,
                 default=config.get(CONF_LOCAL_KEY, ""),

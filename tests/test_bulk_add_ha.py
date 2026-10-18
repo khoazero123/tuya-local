@@ -284,3 +284,43 @@ async def test_a_device_that_fails_to_create_is_reported_not_fatal(hass, mocker)
     assert response["added"] == 1
     assert len(response["failed"]) == 1
     assert "boom" in response["failed"][0]["error"]
+
+
+async def test_plan_asks_the_device_when_several_configs_match(hass, mocker):
+    """First alphabetically is only the fallback; the device decides (#24)."""
+    _patch_lookups(
+        mocker, {"a": _device("dev_multi")}, reachable={"192.168.1.50": True}
+    )
+    mocker.patch.object(
+        bulk_add, "_type_index", return_value={PRODUCT_LISTED: ["type_a", "type_b"]}
+    )
+    infer = mocker.patch.object(
+        bulk_add, "_infer_type", AsyncMock(return_value="type_b")
+    )
+
+    plan = await bulk_add.async_plan_devices(hass)
+
+    item = plan["add"][0]
+    assert item["type"] == "type_b"
+    assert item["type_source"] == "probe"
+    assert item["alternatives"] == ["type_a"]
+    infer.assert_awaited_once()
+
+
+async def test_plan_keeps_the_product_pick_when_the_probe_disagrees(hass, mocker):
+    _patch_lookups(
+        mocker, {"a": _device("dev_multi")}, reachable={"192.168.1.50": True}
+    )
+    mocker.patch.object(
+        bulk_add, "_type_index", return_value={PRODUCT_LISTED: ["type_a", "type_b"]}
+    )
+    mocker.patch.object(
+        bulk_add, "_infer_type", AsyncMock(return_value="something_else")
+    )
+
+    plan = await bulk_add.async_plan_devices(hass)
+
+    item = plan["add"][0]
+    assert item["type"] == "type_a"
+    assert item["type_source"] == "product"
+    assert item["alternatives"] == ["type_b"]

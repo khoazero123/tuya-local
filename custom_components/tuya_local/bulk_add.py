@@ -256,6 +256,15 @@ def _type_index(product_ids: set[str]) -> dict[str, list[str]]:
     return {pid: _TYPE_CACHE.get(pid, []) for pid in product_ids if pid}
 
 
+async def async_types_for_products(
+    hass: HomeAssistant, product_ids: list[str]
+) -> dict[str, list[str]]:
+    """Return ``{product_id: [config types listing it]}``, cached per session."""
+    return await hass.async_add_executor_job(
+        _type_index, {pid for pid in product_ids if pid}
+    )
+
+
 async def async_plan_devices(
     hass: HomeAssistant,
     *,
@@ -343,6 +352,23 @@ async def async_plan_devices(
         elif not item["reachable"] and item.get("needs_probe"):
             # No config to take the type from, and no device to ask.
             item.update(action="skip", reason=SKIP_TYPE_UNKNOWN)
+
+    # Several configs can list one product id.  Take the first alphabetically as
+    # the fallback, but ask the device which one fits when it answers, so a wrong
+    # pick is less likely (PATCHES.md #24).
+    for item in candidates:
+        if item["action"] != "add" or not item.get("alternatives"):
+            continue
+        if not item["reachable"]:
+            continue
+        merged = [item["type"], *item["alternatives"]]
+        inferred = await _infer_type(hass, item)
+        if inferred and inferred in merged:
+            item["type"] = inferred
+            item["type_source"] = "probe"
+            item["alternatives"] = [t for t in merged if t != inferred]
+        else:
+            item["type_source"] = "product"
 
     plan_add = [i for i in candidates if i["action"] == "add"]
     plan_skip = [i for i in candidates if i["action"] != "add"]

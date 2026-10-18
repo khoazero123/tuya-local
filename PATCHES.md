@@ -734,3 +734,38 @@ domain from the recorder) if history should not keep it.
 
 Tests: `tests/test_lan_sensors.py` (+6), `tests/test_sensor.py`,
 `tests/test_binary_sensor.py`.
+
+## 24. Device type: smarter auto-add pick, and a way to change it later (2026.10.0.24)
+
+**Problem:** auto-add had to choose a device config (the `type`) for every device it
+creates, and the type used to be fixed for the life of the entry:
+
+- a device is matched by `matches_product(product_id)` against each config's
+  `products:` list;
+- when several configs list the same product, the **first alphabetically** was
+  taken and the rest only reported as `alternatives` - a wrong pick could only be
+  fixed by deleting the entry and adding the device again.
+
+**Patch - smarter pick (`bulk_add`):**
+
+- if more than one config lists the product id, the plan now **asks the device**
+  (`_infer_type` -> `async_inferred_type()`, DP quality scoring, the path the mobile
+  app uses) and takes that type when it is one of the candidates;
+- `type_source` says where the type came from (`product` or `probe`);
+- the remaining candidates stay in `alternatives` either way.
+
+**Patch - change it afterwards (`config_flow` options flow):**
+
+- the device's **Configure** dialog now has a **Device type** dropdown;
+- the types that list the device's product id come first (labelled "khớp product
+  id"), the current one is labelled "đang dùng", everything else follows;
+- the choice is stored in the entry *options*, so it wins over the original data
+  and the entry reloads with the new config;
+- the connection is tested with the new type before saving, so a type that does not
+  fit the device is rejected like in the add flow.
+
+**Note:** changing the type replaces the entities. Registry entries for entities the
+new config does not have stay behind as unavailable and can be deleted.
+
+Tests: `tests/test_config_flow.py` (options flow now carries the type, plus a type
+change test), `tests/test_bulk_add_ha.py` (+2 plan tests).
