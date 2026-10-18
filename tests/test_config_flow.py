@@ -1925,3 +1925,55 @@ def _field_names(form) -> list[str]:
     schema = form.get("data_schema")
     mapping = getattr(schema, "schema", None) or {}
     return [getattr(marker, "schema", None) for marker in mapping]
+
+
+@pytest.mark.asyncio
+async def test_options_flow_uses_the_running_sub_device(hass, bypass_setup, mocker):
+    """Sub devices live under "<hub id>/<node id>" in hass.data."""
+    from custom_components.tuya_local.helpers.config import get_device_id
+
+    mocker.patch(
+        "custom_components.tuya_local.config_flow.async_test_connection",
+        return_value=mocker.MagicMock(),
+    )
+
+    data = {
+        CONF_DEVICE_ID: "hubid",
+        CONF_DEVICE_CID: "nodeid",
+        CONF_HOST: "hostname",
+        CONF_LOCAL_KEY: TESTKEY,
+        CONF_NAME: "sub",
+        CONF_POLL_ONLY: False,
+        CONF_PROTOCOL_VERSION: "auto",
+        CONF_TYPE: "ard100_valve",
+    }
+    config_entry = MockConfigEntry(
+        domain=DOMAIN, version=13, unique_id="uniqueid", data=data
+    )
+    config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    def _candidate(config_type):
+        candidate = mocker.MagicMock()
+        candidate.config_type = config_type
+        candidate.match_quality.return_value = 90
+        candidate.product_display_entries.return_value = [("ZemiSmart", "Valve")]
+        return candidate
+
+    device = mocker.MagicMock()
+    device.async_possible_types = mocker.AsyncMock(
+        return_value=[_candidate("ard100_valve"), _candidate("other_valve")]
+    )
+    device._get_cached_state.return_value = {1: True}
+    device._product_ids = ["pk"]
+
+    runtime_key = get_device_id(data)
+    assert runtime_key == "hubid/nodeid"
+    hass.data.setdefault(DOMAIN, {})[runtime_key] = {"device": device}
+
+    form = await hass.config_entries.options.async_init(config_entry.entry_id)
+    values = _type_values(form)
+
+    assert values == ["ard100_valve", "other_valve"]
+    device.async_possible_types.assert_awaited()

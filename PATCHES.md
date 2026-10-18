@@ -842,3 +842,18 @@ the add-device flow does.
 
 Tests: `tests/test_config_flow.py` - the list holds the current type plus the
 device's candidates, and the form has no `type_search` field.
+
+## 28. Type list resolves the running sub device (2026.10.0.28)
+
+**Problem:** for a Zigbee child, the Configure dialog offered only one type (the
+current one). `hass.data[DOMAIN]` keys a sub device as **`<hub id>/<node id>`**, but
+the options flow looked it up by `CONF_DEVICE_ID` (the hub id alone), found nothing,
+and fell back to the product-id index - which only knows the hub's product.
+
+**Patch - `config_flow` options flow:** `_async_type_options()` resolves the runtime
+key with `get_device_id(config)` (which appends the cid), so the real device object
+is used and its `async_possible_types()` candidates are listed. The offline fallback
+still queries `bulk_add` with the bare device id + cid.
+
+Tests: `tests/test_config_flow.py` - a sub device keyed `hubid/nodeid` now yields its
+runner's candidate list.

@@ -811,7 +811,9 @@ class OptionsFlowHandler(OptionsFlow):
         searching, no full template list - just the candidates that fit.
         """
         current = config.get(CONF_TYPE)
-        device_id = config.get(CONF_DEVICE_ID)
+        # Sub devices are keyed by "<hub id>/<node id>" in hass.data, so resolve the
+        # runtime key instead of trusting device_id alone.
+        device_id = get_device_id(config)
         options: list[SelectOptionDict] = []
 
         device = (self.hass.data.get(DOMAIN) or {}).get(device_id, {}).get("device")
@@ -843,7 +845,12 @@ class OptionsFlowHandler(OptionsFlow):
             # needs no connection.
             from .bulk_add import async_types_for_products, find_cached_device
 
-            record = find_cached_device(device_id, config.get(CONF_DEVICE_CID)) or {}
+            record = (
+                find_cached_device(
+                    config.get(CONF_DEVICE_ID), config.get(CONF_DEVICE_CID)
+                )
+                or {}
+            )
             product_id = record.get("product_id")
             if product_id:
                 index = await async_types_for_products(self.hass, [product_id])
