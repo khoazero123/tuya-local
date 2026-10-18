@@ -784,6 +784,10 @@ class OptionsFlowHandler(OptionsFlow):
         """Initialize options flow."""
 
     async def async_step_init(self, user_input=None):
+        # The service entry only owns the integration level buttons and the refresh
+        # interval; it has no device type, so there is nothing to configure here.
+        if self.config_entry.data.get(CONF_SERVICE_ENTRY):
+            return self.async_abort(reason="service_entry")
         return await self.async_step_user(user_input)
 
     async def _async_save_options(self, user_input: dict):

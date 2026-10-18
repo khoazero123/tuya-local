@@ -113,7 +113,8 @@
       "connection": "Unable to connect to your device with those details. It could be an intermittent issue, or they may be incorrect. If you selected a specific protocol version, try 'auto' instead."
     },
     "abort": {
-      "not_supported": "Sorry, there is no support for this device."
+      "not_supported": "Sorry, there is no support for this device.",
+      "service_entry": "This entry only holds the integration level controls (refresh and logout buttons, cloud refresh interval). There is nothing to configure here."
     }
   },
   "services": {

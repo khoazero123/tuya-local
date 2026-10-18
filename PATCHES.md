@@ -857,3 +857,16 @@ still queries `bulk_add` with the bare device id + cid.
 
 Tests: `tests/test_config_flow.py` - a sub device keyed `hubid/nodeid` now yields its
 runner's candidate list.
+
+## 29. The service entry cannot be configured (2026.10.0.29)
+
+**Problem:** opening *Configure* on the "Tuya Local" service entry (patch #20) returned
+**500 Internal Server Error** - that entry has no `type`, so building the options form
+crashed.
+
+**Patch:** `OptionsFlowHandler.async_step_init()` aborts with `service_entry` for it,
+with a translation explaining that the entry only owns the integration level controls
+(refresh/logout buttons and the cloud refresh interval).
+
+Tests: `tests/test_config_flow.py` - the service entry returns an abort instead of an
+error.

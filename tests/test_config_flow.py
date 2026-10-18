@@ -1977,3 +1977,23 @@ async def test_options_flow_uses_the_running_sub_device(hass, bypass_setup, mock
 
     assert values == ["ard100_valve", "other_valve"]
     device.async_possible_types.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_options_flow_aborts_for_the_service_entry(hass, bypass_setup):
+    """The service entry has no device type, so it cannot be configured."""
+    from custom_components.tuya_local.const import CONF_SERVICE_ENTRY
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        version=13,
+        minor_version=24,
+        title="Tuya Local",
+        data={CONF_SERVICE_ENTRY: True},
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] == "abort"
+    assert result["reason"] == "service_entry"
